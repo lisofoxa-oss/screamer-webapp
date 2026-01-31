@@ -759,66 +759,43 @@ function sendData(score, avgPre, avgPost, scr) {
         telegram_id: userId
     };
     
-    console.log('Sending data:', data);
+    // Сохраняем данные для отправки при закрытии
+    window.gameResultData = JSON.stringify(data);
     
-    if (tg && tg.sendData) {
-        try {
-            // Отправляем данные в Telegram
-            tg.sendData(JSON.stringify(data));
-            console.log('Data sent via Telegram WebApp');
-            
-            // WebApp автоматически закроется после sendData
-            // Но на всякий случай закроем через таймаут
-            setTimeout(() => {
-                if (tg.close) tg.close();
-            }, 1000);
-            
-        } catch (e) {
-            console.error('Telegram sendData error:', e);
-            // Fallback - отправить через API
-            sendViaApi(data);
-        }
-    } else {
-        console.log('No Telegram WebApp, using API fallback');
-        sendViaApi(data);
-    }
-}
-
-function sendViaApi(data) {
-    // Fallback: отправка через API endpoint
-    // URL бэкенда берём из параметров или дефолтный
-    const apiUrl = urlParams.get('api_url');
-    
-    if (!apiUrl) {
-        console.log('No API URL, data logged only:', data);
-        console.table({
-            'Pre startDelay': data.pre_start_delay + ' ms',
-            'Scream startDelay': data.scream_start_delay + ' ms',
-            'Micro-freeze': data.scream_micro_freeze + ' ms',
-            'Direction error': data.scream_direction_error + '°',
-            'Speed variability': (data.scream_speed_variability * 100) + '%',
-            'Score': data.fear_score
-        });
-        return;
-    }
-    
-    fetch(apiUrl + '/api/game-result', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-    })
-    .then(r => r.json())
-    .then(result => console.log('API result:', result))
-    .catch(e => console.error('API error:', e));
+    console.log('Game data prepared:', data);
+    console.table({
+        'Pre startDelay': data.pre_start_delay + ' ms',
+        'Scream startDelay': data.scream_start_delay + ' ms',
+        'Micro-freeze': data.scream_micro_freeze + ' ms',
+        'Direction error': data.scream_direction_error + '°',
+        'Speed variability': (data.scream_speed_variability * 100) + '%',
+        'Score': data.fear_score
+    });
 }
 
 function restart() {
+    // Очищаем данные предыдущей игры (не отправляем)
+    window.gameResultData = null;
     playAmbient();
     startGame();
 }
 
 function closeApp() {
     stopAmbient();
-    if (tg) tg.close();
-    else show('warning');
+    
+    // Отправляем данные перед закрытием
+    if (window.gameResultData && tg && tg.sendData) {
+        console.log('Sending data on close...');
+        try {
+            tg.sendData(window.gameResultData);
+            // После sendData WebApp закроется автоматически
+        } catch (e) {
+            console.error('sendData error:', e);
+            if (tg.close) tg.close();
+        }
+    } else if (tg && tg.close) {
+        tg.close();
+    } else {
+        show('warning');
+    }
 }
