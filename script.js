@@ -756,25 +756,57 @@ function sendData(score, avgPre, avgPost, scr) {
         input_type: state.isMouse ? 'mouse' : 'touch',
         screamer_round: state.screamerRound + 1,
         device_info: navigator.userAgent,
-        telegram_id: userId
+        telegram_id: userId,
+        username: tg?.initDataUnsafe?.user?.username || 'unknown'
     };
     
-    // Сохраняем данные для отправки при закрытии
-    window.gameResultData = JSON.stringify(data);
+    window.gameResultData = data;
     
     console.log('Game data prepared:', data);
-    console.table({
-        'Pre startDelay': data.pre_start_delay + ' ms',
-        'Scream startDelay': data.scream_start_delay + ' ms',
-        'Micro-freeze': data.scream_micro_freeze + ' ms',
-        'Direction error': data.scream_direction_error + '°',
-        'Speed variability': (data.scream_speed_variability * 100) + '%',
-        'Score': data.fear_score
-    });
+}
+
+// URL бэкенда - ЗАМЕНИ НА СВОЙ!
+const API_URL = 'https://screamer-backend.onrender.com';
+
+async function saveAndClose() {
+    const data = window.gameResultData;
+    if (!data) {
+        alert('Нет данных для сохранения');
+        return;
+    }
+    
+    // Показываем что сохраняем
+    const btn = document.querySelector('#results .btn-secondary');
+    if (btn) btn.textContent = '⏳ Сохраняю...';
+    
+    try {
+        const response = await fetch(API_URL + '/api/game-result', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        console.log('Save result:', result);
+        
+        if (result.success) {
+            if (btn) btn.textContent = '✅ Сохранено!';
+            // Закрываем через секунду
+            setTimeout(() => {
+                if (tg && tg.close) tg.close();
+            }, 1000);
+        } else {
+            if (btn) btn.textContent = '❌ Ошибка';
+            alert('Ошибка: ' + (result.error || 'unknown'));
+        }
+    } catch (e) {
+        console.error('Save error:', e);
+        if (btn) btn.textContent = '❌ Ошибка сети';
+        alert('Ошибка сети: ' + e.message);
+    }
 }
 
 function restart() {
-    // Очищаем данные предыдущей игры (не отправляем)
     window.gameResultData = null;
     playAmbient();
     startGame();
@@ -782,20 +814,5 @@ function restart() {
 
 function closeApp() {
     stopAmbient();
-    
-    // Отправляем данные перед закрытием
-    if (window.gameResultData && tg && tg.sendData) {
-        console.log('Sending data on close...');
-        try {
-            tg.sendData(window.gameResultData);
-            // После sendData WebApp закроется автоматически
-        } catch (e) {
-            console.error('sendData error:', e);
-            if (tg.close) tg.close();
-        }
-    } else if (tg && tg.close) {
-        tg.close();
-    } else {
-        show('warning');
-    }
+    saveAndClose();
 }
