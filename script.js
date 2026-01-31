@@ -319,8 +319,8 @@ function onMouseUp(e) {
 }
 
 function handleRelease() {
-    if (state.phase === 'toHeart' || state.phase === 'toZone') {
-        if (state.isScreamerRound && !state.screamerHappened) {
+    if (state.phase === 'toHeart' || state.phase === 'toZone' || state.phase === 'screamerShock') {
+        if (state.isScreamerRound) {
             state.screamer.lost = true;
         }
         fail();
@@ -341,32 +341,38 @@ function process(x, y, prevX, prevY) {
     if (state.phase === 'wait') {
         if (inZone(x, y)) enterZone(x, y);
     }
-    else if (state.phase === 'toHeart') {
-        // Трекинг траектории
+    else if (state.phase === 'toHeart' || state.phase === 'screamerShock') {
+        // Трекинг траектории (собираем и во время шока от скримера!)
         if (prevX !== undefined) {
-            const dt = 16; // ~60fps assumed
+            const dt = now - (state.lastMoveTime || now);
+            state.lastMoveTime = now;
+            
             const dx = x - prevX;
             const dy = y - prevY;
-            const speed = Math.sqrt(dx*dx + dy*dy) / dt * 1000; // px/sec
+            const distance = Math.sqrt(dx*dx + dy*dy);
+            const speed = dt > 0 ? distance / dt * 1000 : 0; // px/sec
             
-            // Вектор к сердцу
-            const toHeartX = heartX - prevX;
-            const toHeartY = heartY - prevY;
-            const angle = angleBetween(dx, dy, toHeartX, toHeartY);
+            // Вектор к сердцу (если сердце уже есть)
+            let angle = 0;
+            if (heartX && heartY) {
+                const toHeartX = heartX - prevX;
+                const toHeartY = heartY - prevY;
+                angle = angleBetween(dx, dy, toHeartX, toHeartY);
+            }
             
-            state.trajectory.push({ x, y, t: now, speed, angle, dx, dy });
+            state.trajectory.push({ x, y, t: now, speed, angle, dx, dy, distance });
         }
         
         // Детектим начало движения
-        if (!state.moveAt) {
+        if (!state.moveAt && state.phase === 'toHeart') {
             const moved = dist(state.startX, state.startY, x, y);
             if (moved > MOVE_TH) {
                 state.moveAt = now;
             }
         }
         
-        // Проверка поимки
-        if (onHeart(x, y)) {
+        // Проверка поимки (только если сердце видно)
+        if (state.phase === 'toHeart' && onHeart(x, y)) {
             catchHeart(x, y);
         }
     }
@@ -395,19 +401,20 @@ function showHeart() {
     state.heartCaughtThisRound = false;
     state.returnedThisRound = false;
     state.trajectory = [];
+    state.lastMoveTime = Date.now();
     
     // Сердце при скримере дальше от круга
     placeHeart(state.isScreamerRound);
     
     state.startX = state.lastX;
     state.startY = state.lastY;
-    state.heartAt = Date.now();
     state.moveAt = 0;
     
     el.zone.className = 'hold-zone waiting';
     
     if (state.isScreamerRound) {
         // === СКРИМЕР! ===
+        state.screamerAt = Date.now(); // Запоминаем момент скримера
         
         // Рандомный emoji если картинка не загрузилась
         if (el.screamerEmoji) {
@@ -418,10 +425,14 @@ function showHeart() {
         playScream();
         if (navigator.vibrate) navigator.vibrate([200, 50, 200, 50, 300]);
         
+        // СРАЗУ начинаем трекать траекторию (ловим шок!)
+        state.phase = 'screamerShock';
+        state.heartAt = Date.now();
+        
         // Сердце появляется с ЗАДЕРЖКОЙ после скримера
         setTimeout(() => {
             state.phase = 'toHeart';
-            state.heartAt = Date.now(); // Обновляем время появления сердца
+            state.heartAt = Date.now(); // Время появления сердца
             el.heart.classList.remove('fading');
             el.heart.classList.add('visible');
             
@@ -442,6 +453,7 @@ function showHeart() {
     } else {
         // Обычное сердце
         state.phase = 'toHeart';
+        state.heartAt = Date.now();
         el.heart.classList.remove('fading');
         el.heart.classList.add('visible');
         
@@ -478,56 +490,85 @@ function catchHeart(x, y) {
     el.zone.className = 'hold-zone';
     el.instruction.textContent = '← В круг';
     
-    // Анализ траектории для метрик скримера
-    let metrics = { microFreeze: 0, directionError: 0, speedVariability: 0 };
+    // Анализ траектории
+    let metrics = { microFreeze: 0, directionError: 0, speedVariability: 0, totalJerk: 0 };
     
-    if (state.isScreamerRound && state.trajectory.length > 3) {
+    console.log('=== CATCH HEART ===');
+    console.log('isScreamerRound:', state.isScreamerRound);
+    console.log('trajectory length:', state.trajectory.length);
+    
+    if (state.trajectory.length > 1) {
         metrics = analyzeTrajectory(state.trajectory);
     }
     
     state._currentRound = { startDelay, catchTime, ...metrics };
     
     if (state.isScreamerRound) {
+        console.log('Recording screamer metrics!');
         state.screamer.startDelay = startDelay;
         state.screamer.catchTime = catchTime;
         state.screamer.microFreeze = metrics.microFreeze;
         state.screamer.directionError = metrics.directionError;
         state.screamer.speedVariability = metrics.speedVariability;
+        state.screamer.totalJerk = metrics.totalJerk;
+        
+        // Время шока от скримера до начала движения к сердцу
+        if (state.screamerAt) {
+            state.screamer.shockDuration = state.moveAt ? state.moveAt - state.screamerAt : catchTime;
+            console.log('Shock duration:', state.screamer.shockDuration);
+        }
     }
 }
 
 function analyzeTrajectory(traj) {
-    if (traj.length < 3) return { microFreeze: 0, directionError: 0, speedVariability: 0 };
+    if (traj.length < 2) return { microFreeze: 0, directionError: 0, speedVariability: 0, totalJerk: 0 };
     
-    // 1. Micro-freeze: пауза в начале движения
+    console.log('Analyzing trajectory, points:', traj.length);
+    
+    // 1. Micro-freeze: ищем паузы в движении
     let microFreeze = 0;
-    for (let i = 1; i < Math.min(5, traj.length); i++) {
+    let maxGap = 0;
+    for (let i = 1; i < traj.length; i++) {
         const gap = traj[i].t - traj[i-1].t;
-        if (gap > 80) { // Пауза больше 80мс
+        if (gap > maxGap) maxGap = gap;
+        if (gap > 50 && microFreeze === 0) { // Первая пауза больше 50мс
             microFreeze = gap;
-            break;
         }
     }
+    console.log('  MicroFreeze:', microFreeze, 'MaxGap:', maxGap);
     
-    // 2. Direction error: среднее отклонение от направления к сердцу
+    // 2. Direction error: как кривлялась траектория
     let totalAngle = 0;
     let angleCount = 0;
-    for (let i = 0; i < Math.min(10, traj.length); i++) {
-        if (traj[i].angle !== undefined && traj[i].speed > 50) { // Игнорируем медленные точки
+    for (let i = 0; i < traj.length; i++) {
+        if (traj[i].angle !== undefined && !isNaN(traj[i].angle) && traj[i].distance > 3) {
             totalAngle += traj[i].angle;
             angleCount++;
         }
     }
     const directionError = angleCount > 0 ? totalAngle / angleCount : 0;
+    console.log('  DirError:', directionError.toFixed(1), 'from', angleCount, 'points');
     
-    // 3. Speed variability: стандартное отклонение скорости
-    const speeds = traj.filter(p => p.speed > 0).map(p => p.speed);
+    // 3. Speed variability
+    const speeds = traj.filter(p => p.speed > 0 && !isNaN(p.speed)).map(p => p.speed);
     let speedVariability = 0;
     if (speeds.length > 2) {
         const avgSpeed = speeds.reduce((a, b) => a + b, 0) / speeds.length;
         const variance = speeds.reduce((sum, s) => sum + (s - avgSpeed) ** 2, 0) / speeds.length;
-        speedVariability = Math.sqrt(variance) / avgSpeed; // Коэффициент вариации
+        speedVariability = avgSpeed > 0 ? Math.sqrt(variance) / avgSpeed : 0;
     }
+    console.log('  SpeedVar:', (speedVariability*100).toFixed(0) + '%', 'from', speeds.length, 'speeds');
+    
+    // 4. Total jerk (рывки) - сумма резких изменений скорости
+    let totalJerk = 0;
+    for (let i = 1; i < speeds.length; i++) {
+        const jerk = Math.abs(speeds[i] - speeds[i-1]);
+        if (jerk > 500) totalJerk += jerk; // Только значимые рывки
+    }
+    console.log('  TotalJerk:', totalJerk.toFixed(0));
+    
+    return { microFreeze, directionError, speedVariability, totalJerk };
+}
     
     return { microFreeze, directionError, speedVariability };
 }
@@ -615,6 +656,7 @@ function fail() {
     if (state.isScreamerRound) {
         state.screamer.lost = true;
         state.isScreamerRound = false;
+        state.screamerHappened = true;
     }
     
     state.heartsMissed++;
@@ -657,49 +699,75 @@ function showResults() {
     
     // === РАСЧЁТ SCORE ===
     let score = 0;
+    let scoreDetails = [];
     
-    // 1. Потерял/не поймал при скримере
+    // 1. Потерял/не поймал при скримере - главный показатель!
     if (scr.lost) {
-        score += 45;
+        score += 50;
+        scoreDetails.push('Lost: +50');
     }
     
-    // 2. Задержка старта (главная метрика)
-    if (avgPre.startDelay > 0 && scr.startDelay > 0) {
-        const ratio = scr.startDelay / avgPre.startDelay;
-        if (ratio > 1.1) {
-            score += Math.min(25, Math.round((ratio - 1) * 40));
-        }
-    }
-    
-    // 3. Micro-freeze (ступор)
-    if (scr.microFreeze > 80) {
-        score += Math.min(10, Math.round(scr.microFreeze / 30));
-    }
-    
-    // 4. Direction error (отклонение траектории)
-    if (scr.directionError > 15) {
-        score += Math.min(10, Math.round(scr.directionError / 5));
-    }
-    
-    // 5. Speed variability (нестабильность скорости)
-    if (scr.speedVariability > 0.5) {
-        score += Math.min(8, Math.round(scr.speedVariability * 10));
-    }
-    
-    // 6. Время поимки
+    // 2. Время поимки при скримере vs калибровка (надёжная метрика)
     if (avgPre.catchTime > 0 && scr.catchTime > 0) {
         const ratio = scr.catchTime / avgPre.catchTime;
-        if (ratio > 1.15) {
-            score += Math.min(10, Math.round((ratio - 1) * 20));
+        // Если при скримере ловил дольше - испугался
+        if (ratio > 1.05) {
+            const points = Math.min(25, Math.round((ratio - 1) * 50));
+            score += points;
+            scoreDetails.push(`CatchTime ratio ${ratio.toFixed(2)}: +${points}`);
         }
     }
     
-    // 7. Восстановление после скримера
-    if (avgPost.startDelay > avgPre.startDelay * 1.1) {
+    // 3. Время возврата при скримере
+    if (avgPre.returnTime > 0 && scr.returnTime > 0) {
+        const ratio = scr.returnTime / avgPre.returnTime;
+        if (ratio > 1.1) {
+            const points = Math.min(15, Math.round((ratio - 1) * 30));
+            score += points;
+            scoreDetails.push(`ReturnTime ratio ${ratio.toFixed(2)}: +${points}`);
+        }
+    }
+    
+    // 4. Micro-freeze (ступор) - если есть
+    if (scr.microFreeze > 50) {
+        const points = Math.min(10, Math.round(scr.microFreeze / 20));
+        score += points;
+        scoreDetails.push(`MicroFreeze ${scr.microFreeze}ms: +${points}`);
+    }
+    
+    // 5. Direction error (кривая траектория)
+    if (scr.directionError > 10) {
+        const points = Math.min(10, Math.round(scr.directionError / 4));
+        score += points;
+        scoreDetails.push(`DirError ${scr.directionError.toFixed(1)}°: +${points}`);
+    }
+    
+    // 6. Нестабильная скорость
+    if (scr.speedVariability > 0.3) {
+        const points = Math.min(8, Math.round(scr.speedVariability * 15));
+        score += points;
+        scoreDetails.push(`SpeedVar ${(scr.speedVariability*100).toFixed(0)}%: +${points}`);
+    }
+    
+    // 7. Сравнение post vs pre - долго восстанавливался
+    if (post.length > 0 && avgPost.catchTime > avgPre.catchTime * 1.05) {
         score += 5;
+        scoreDetails.push('SlowRecovery: +5');
+    }
+    
+    // 8. Пропущенные сердца вообще
+    if (state.heartsMissed > 0) {
+        const points = state.heartsMissed * 5;
+        score += points;
+        scoreDetails.push(`Missed ${state.heartsMissed}: +${points}`);
     }
     
     score = Math.min(100, Math.max(0, Math.round(score)));
+    
+    // DEBUG
+    console.log('=== SCORE BREAKDOWN ===');
+    scoreDetails.forEach(d => console.log('  ' + d));
+    console.log('  TOTAL:', score);
     
     // Лейбл
     let label = '';
@@ -725,6 +793,27 @@ function showResults() {
     sendData(score, avgPre, avgPost, scr);
     
     show('results');
+}
+
+// URL бэкенда
+const API_URL = 'https://screamer-backend.onrender.com';
+
+async function saveGame(data) {
+    try {
+        console.log('Saving game...', data);
+        const response = await fetch(API_URL + '/api/game-result', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        console.log('Save result:', result);
+        return result.success;
+    } catch (e) {
+        console.error('Save error:', e);
+        return false;
+    }
 }
 
 function sendData(score, avgPre, avgPost, scr) {
@@ -760,50 +849,26 @@ function sendData(score, avgPre, avgPost, scr) {
         username: tg?.initDataUnsafe?.user?.username || 'unknown'
     };
     
+    // DEBUG - показываем все метрики в консоли
+    console.log('=== GAME METRICS ===');
+    console.log('Pre-calibration:', avgPre);
+    console.log('Screamer:', scr);
+    console.log('Post-calibration:', avgPost);
+    console.log('Score breakdown:');
+    console.log('  - Lost:', scr.lost ? '+45' : '0');
+    if (avgPre.startDelay > 0 && scr.startDelay > 0) {
+        const ratio = scr.startDelay / avgPre.startDelay;
+        console.log('  - StartDelay ratio:', ratio.toFixed(2), ratio > 1.1 ? `+${Math.min(25, Math.round((ratio - 1) * 40))}` : '+0');
+    }
+    console.log('  - MicroFreeze:', scr.microFreeze, scr.microFreeze > 80 ? `+${Math.min(10, Math.round(scr.microFreeze / 30))}` : '+0');
+    console.log('  - DirError:', scr.directionError, scr.directionError > 15 ? `+${Math.min(10, Math.round(scr.directionError / 5))}` : '+0');
+    console.log('  - SpeedVar:', scr.speedVariability, scr.speedVariability > 0.5 ? `+${Math.min(8, Math.round(scr.speedVariability * 10))}` : '+0');
+    console.log('Final score:', score);
+    
+    // АВТОСОХРАНЕНИЕ сразу после игры
+    saveGame(data);
+    
     window.gameResultData = data;
-    
-    console.log('Game data prepared:', data);
-}
-
-// URL бэкенда - ЗАМЕНИ НА СВОЙ!
-const API_URL = 'https://screamer-backend.onrender.com';
-
-async function saveAndClose() {
-    const data = window.gameResultData;
-    if (!data) {
-        alert('Нет данных для сохранения');
-        return;
-    }
-    
-    // Показываем что сохраняем
-    const btn = document.querySelector('#results .btn-secondary');
-    if (btn) btn.textContent = '⏳ Сохраняю...';
-    
-    try {
-        const response = await fetch(API_URL + '/api/game-result', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-        
-        const result = await response.json();
-        console.log('Save result:', result);
-        
-        if (result.success) {
-            if (btn) btn.textContent = '✅ Сохранено!';
-            // Закрываем через секунду
-            setTimeout(() => {
-                if (tg && tg.close) tg.close();
-            }, 1000);
-        } else {
-            if (btn) btn.textContent = '❌ Ошибка';
-            alert('Ошибка: ' + (result.error || 'unknown'));
-        }
-    } catch (e) {
-        console.error('Save error:', e);
-        if (btn) btn.textContent = '❌ Ошибка сети';
-        alert('Ошибка сети: ' + e.message);
-    }
 }
 
 function restart() {
@@ -814,5 +879,9 @@ function restart() {
 
 function closeApp() {
     stopAmbient();
-    saveAndClose();
+    if (tg && tg.close) {
+        tg.close();
+    } else {
+        show('warning');
+    }
 }
