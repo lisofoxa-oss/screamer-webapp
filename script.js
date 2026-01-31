@@ -1,9 +1,20 @@
 // === Telegram ===
 const tg = window.Telegram?.WebApp;
-if (tg) { tg.expand(); tg.ready(); }
+
+// Логируем состояние Telegram WebApp
+console.log('Telegram WebApp:', tg ? 'Available' : 'Not available');
+console.log('Telegram initData:', tg?.initData || 'none');
+console.log('Telegram initDataUnsafe:', tg?.initDataUnsafe || 'none');
+
+if (tg) { 
+    tg.expand(); 
+    tg.ready();
+    console.log('Telegram WebApp expanded and ready');
+}
 
 const urlParams = new URLSearchParams(window.location.search);
 const userId = urlParams.get('user_id') || tg?.initDataUnsafe?.user?.id;
+console.log('User ID:', userId);
 
 // === Audio ===
 let soundOn = true;
@@ -744,22 +755,61 @@ function sendData(score, avgPre, avgPost, scr) {
         
         input_type: state.isMouse ? 'mouse' : 'touch',
         screamer_round: state.screamerRound + 1,
-        device_info: navigator.userAgent
+        device_info: navigator.userAgent,
+        telegram_id: userId
     };
     
-    if (tg) {
-        tg.sendData(JSON.stringify(data));
+    console.log('Sending data:', data);
+    
+    if (tg && tg.sendData) {
+        try {
+            // Отправляем данные в Telegram
+            tg.sendData(JSON.stringify(data));
+            console.log('Data sent via Telegram WebApp');
+            
+            // WebApp автоматически закроется после sendData
+            // Но на всякий случай закроем через таймаут
+            setTimeout(() => {
+                if (tg.close) tg.close();
+            }, 1000);
+            
+        } catch (e) {
+            console.error('Telegram sendData error:', e);
+            // Fallback - отправить через API
+            sendViaApi(data);
+        }
     } else {
-        console.log('Game result:', data);
-        console.table({
-            'Pre startDelay': avgPre.startDelay.toFixed(0) + ' ms',
-            'Scream startDelay': scr.startDelay.toFixed(0) + ' ms',
-            'Micro-freeze': scr.microFreeze.toFixed(0) + ' ms',
-            'Direction error': scr.directionError.toFixed(1) + '°',
-            'Speed variability': (scr.speedVariability * 100).toFixed(0) + '%',
-            'Score': score
-        });
+        console.log('No Telegram WebApp, using API fallback');
+        sendViaApi(data);
     }
+}
+
+function sendViaApi(data) {
+    // Fallback: отправка через API endpoint
+    // URL бэкенда берём из параметров или дефолтный
+    const apiUrl = urlParams.get('api_url');
+    
+    if (!apiUrl) {
+        console.log('No API URL, data logged only:', data);
+        console.table({
+            'Pre startDelay': data.pre_start_delay + ' ms',
+            'Scream startDelay': data.scream_start_delay + ' ms',
+            'Micro-freeze': data.scream_micro_freeze + ' ms',
+            'Direction error': data.scream_direction_error + '°',
+            'Speed variability': (data.scream_speed_variability * 100) + '%',
+            'Score': data.fear_score
+        });
+        return;
+    }
+    
+    fetch(apiUrl + '/api/game-result', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    })
+    .then(r => r.json())
+    .then(result => console.log('API result:', result))
+    .catch(e => console.error('API error:', e));
 }
 
 function restart() {
