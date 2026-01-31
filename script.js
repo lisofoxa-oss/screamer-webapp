@@ -11,39 +11,40 @@ const ambientSound = document.getElementById('ambientSound');
 const laughSound = document.getElementById('laughSound');
 const screamSound = document.getElementById('screamSound');
 
-ambientSound.volume = 0.3;
-laughSound.volume = 0.6;
-screamSound.volume = 0.8;
+if (ambientSound) ambientSound.volume = 0.3;
+if (laughSound) laughSound.volume = 0.6;
+if (screamSound) screamSound.volume = 0.8;
 
 document.getElementById('soundBtn').onclick = () => {
     soundOn = !soundOn;
     document.getElementById('soundBtn').textContent = soundOn ? '🔊' : '🔇';
-    if (!soundOn) ambientSound.pause();
+    if (!soundOn && ambientSound) ambientSound.pause();
 };
 
 function playAmbient() {
-    if (!soundOn) return;
+    if (!soundOn || !ambientSound) return;
     ambientSound.play().catch(() => {});
 }
 
 function stopAmbient() {
+    if (!ambientSound) return;
     ambientSound.pause();
     ambientSound.currentTime = 0;
 }
 
 function playLaugh() {
-    if (!soundOn) return;
+    if (!soundOn || !laughSound) return;
     laughSound.currentTime = 0;
     laughSound.play().catch(() => {});
 }
 
 function playScream() {
     if (!soundOn) return;
-    if (screamSound.readyState >= 2) {
+    if (screamSound && screamSound.readyState >= 2) {
         screamSound.currentTime = 0;
         screamSound.play().catch(() => {});
     } else {
-        // Fallback
+        // Fallback синтезированный звук
         try {
             const ctx = new (window.AudioContext || window.webkitAudioContext)();
             const osc = ctx.createOscillator();
@@ -63,30 +64,40 @@ function playScream() {
 // === Constants ===
 const HEART_R = 40;
 const ZONE_R = 55;
-const MOVE_TH = 15; // Порог движения
-const HEART_TIMEOUT = 1000; // Сердце исчезает через 1 сек
-const TOTAL_HEARTS = 7; // Всего сердец в игре
+const MOVE_TH = 15;
+const HEART_TIMEOUT = 1200; // 1.2 сек на поимку
+const TOTAL_HEARTS = 7;
+const MIN_HEART_DISTANCE = 180; // Минимальная дистанция сердца от круга
+const SCREAMER_HEART_DELAY = 120; // Задержка появления сердца после скримера (мс)
+
+// Emoji скримеры для рандома
+const SCREAMER_EMOJIS = ['👻', '💀', '😱', '🎃', '👹'];
 
 // === State ===
 const state = {
-    phase: 'wait', // wait, toHeart, toZone
+    phase: 'wait',
     round: 0,
     active: false,
     isMouse: false,
+    heartCaughtThisRound: false,
+    returnedThisRound: false,
     
     // Timing
-    heartAt: 0,      // Когда появилось сердце
-    moveAt: 0,       // Когда начал двигаться
-    catchAt: 0,      // Когда поймал
-    returnStartAt: 0, // Когда начал возврат
+    heartAt: 0,
+    moveAt: 0,
+    catchAt: 0,
+    returnStartAt: 0,
     
     // Position
     startX: 0, startY: 0,
     lastX: 0, lastY: 0,
     catchX: 0, catchY: 0,
     
+    // Trajectory tracking (для новых метрик)
+    trajectory: [], // [{x, y, t, speed, angle}]
+    
     // Screamer
-    screamerRound: 0, // На каком раунде скример (рандом 2-4)
+    screamerRound: 0,
     isScreamerRound: false,
     screamerHappened: false,
     
@@ -95,11 +106,22 @@ const state = {
     heartsMissed: 0,
     
     // Data collection
-    preCalib: [],   // До скримера
-    screamer: { startDelay: 0, catchTime: 0, returnTime: 0, lost: false },
-    postCalib: [],  // После скримера
+    preCalib: [],
+    screamer: {
+        startDelay: 0,
+        catchTime: 0,
+        returnTime: 0,
+        lost: false,
+        // Новые метрики
+        microFreeze: 0,        // Пауза после скримера
+        directionError: 0,     // Ошибка направления (градусы)
+        speedVariability: 0,   // Разброс скорости
+        overshoot: 0,          // Проскок
+        correctionDelay: 0     // Время на коррекцию
+    },
+    postCalib: [],
     
-    // Heart timeout
+    // Timer
     heartTimer: null
 };
 
@@ -116,6 +138,8 @@ const el = {
     instruction: $('instruction'),
     heartsCounter: $('heartsCounter'),
     screamer: $('screamer'),
+    screamerImg: $('screamerImg'),
+    screamerEmoji: $('screamerEmoji'),
     score: $('score'),
     scoreFill: $('scoreFill'),
     label: $('label'),
@@ -135,22 +159,32 @@ function zoneCenter() {
 const inZone = (x, y) => dist(x, y, zoneCenter().x, zoneCenter().y) <= ZONE_R;
 const onHeart = (x, y) => dist(x, y, heartX, heartY) <= HEART_R;
 
-// Проверка движения В СТОРОНУ сердца
-function isMovingTowardsHeart(fromX, fromY, toX, toY) {
-    const distBefore = dist(fromX, fromY, heartX, heartY);
-    const distAfter = dist(toX, toY, heartX, heartY);
-    return distAfter < distBefore - 5; // Минимум 5px ближе
+// Угол между двумя векторами (в градусах)
+function angleBetween(v1x, v1y, v2x, v2y) {
+    const dot = v1x * v2x + v1y * v2y;
+    const mag1 = Math.sqrt(v1x*v1x + v1y*v1y);
+    const mag2 = Math.sqrt(v2x*v2x + v2y*v2y);
+    if (mag1 === 0 || mag2 === 0) return 0;
+    const cos = Math.max(-1, Math.min(1, dot / (mag1 * mag2)));
+    return Math.acos(cos) * 180 / Math.PI;
 }
 
 function updateHeartsUI() {
     el.heartsCounter.textContent = `❤️ ${state.heartsCaught}`;
 }
 
-function placeHeart() {
+function placeHeart(forceMinDistance = false) {
+    const zone = zoneCenter();
     const p = 60;
-    const maxY = Math.min(window.innerHeight * 0.35, 250);
-    heartX = p + Math.random() * (window.innerWidth - p*2);
-    heartY = 80 + Math.random() * maxY;
+    const maxY = Math.min(window.innerHeight * 0.4, 300);
+    
+    let attempts = 0;
+    do {
+        heartX = p + Math.random() * (window.innerWidth - p*2);
+        heartY = 80 + Math.random() * maxY;
+        attempts++;
+    } while (forceMinDistance && dist(heartX, heartY, zone.x, zone.y) < MIN_HEART_DISTANCE && attempts < 20);
+    
     el.heart.style.left = (heartX - 20) + 'px';
     el.heart.style.top = (heartY - 20) + 'px';
 }
@@ -171,28 +205,45 @@ function showTutorial() {
 function startGame() {
     show('game');
     
-    // Reset state
+    // 🔥 ЖЁСТКИЙ RESET
+    state.phase = 'wait';
     state.round = 0;
+    state.active = false;
+    state.heartCaughtThisRound = false;
+    state.returnedThisRound = false;
     state.heartsCaught = 0;
     state.heartsMissed = 0;
     state.preCalib = [];
     state.postCalib = [];
-    state.screamer = { startDelay: 0, catchTime: 0, returnTime: 0, lost: false };
+    state.screamer = {
+        startDelay: 0, catchTime: 0, returnTime: 0, lost: false,
+        microFreeze: 0, directionError: 0, speedVariability: 0,
+        overshoot: 0, correctionDelay: 0
+    };
     state.screamerHappened = false;
-	// 🔥 ЖЁСТКИЙ RESET FSM
-    state.phase = 'wait';
-    state.active = false;
-    state.heartCaughtThisRound = false;
+    state.trajectory = [];
     clearTimeout(state.heartTimer);
     
-    // Рандомный раунд для скримера (2, 3 или 4 — т.е. 3й, 4й или 5й сердечко)
+    // Скрыть pointer
+    el.pointer.classList.remove('active');
+    
+    // Рандомный раунд для скримера (2, 3 или 4)
     state.screamerRound = 2 + Math.floor(Math.random() * 3);
     
     updateHeartsUI();
     el.instruction.textContent = 'Положи палец в круг';
     el.zone.className = 'hold-zone';
+    el.heart.classList.remove('visible', 'fading');
     
-    // Events
+    // Remove old listeners first
+    document.removeEventListener('touchstart', onTouchStart);
+    document.removeEventListener('touchmove', onTouchMove);
+    document.removeEventListener('touchend', onTouchEnd);
+    document.removeEventListener('mousedown', onMouseDown);
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+    
+    // Add fresh listeners
     document.addEventListener('touchstart', onTouchStart, { passive: false });
     document.addEventListener('touchmove', onTouchMove, { passive: false });
     document.addEventListener('touchend', onTouchEnd, { passive: false });
@@ -258,7 +309,9 @@ function onMouseUp(e) {
 
 function handleRelease() {
     if (state.phase === 'toHeart' || state.phase === 'toZone') {
-        if (state.isScreamerRound) state.screamer.lost = true;
+        if (state.isScreamerRound && !state.screamerHappened) {
+            state.screamer.lost = true;
+        }
         fail();
     }
     state.active = false;
@@ -278,15 +331,30 @@ function process(x, y, prevX, prevY) {
         if (inZone(x, y)) enterZone(x, y);
     }
     else if (state.phase === 'toHeart') {
-        // Детектим начало движения К СЕРДЦУ
-        if (!state.moveAt && prevX !== undefined) {
+        // Трекинг траектории
+        if (prevX !== undefined) {
+            const dt = 16; // ~60fps assumed
+            const dx = x - prevX;
+            const dy = y - prevY;
+            const speed = Math.sqrt(dx*dx + dy*dy) / dt * 1000; // px/sec
+            
+            // Вектор к сердцу
+            const toHeartX = heartX - prevX;
+            const toHeartY = heartY - prevY;
+            const angle = angleBetween(dx, dy, toHeartX, toHeartY);
+            
+            state.trajectory.push({ x, y, t: now, speed, angle, dx, dy });
+        }
+        
+        // Детектим начало движения
+        if (!state.moveAt) {
             const moved = dist(state.startX, state.startY, x, y);
-            if (moved > MOVE_TH && isMovingTowardsHeart(prevX, prevY, x, y)) {
+            if (moved > MOVE_TH) {
                 state.moveAt = now;
             }
         }
         
-        // Проверяем поимку
+        // Проверка поимки
         if (onHeart(x, y)) {
             catchHeart(x, y);
         }
@@ -303,54 +371,86 @@ function enterZone(x, y) {
     el.zone.className = 'hold-zone active';
     el.instruction.textContent = '';
     
-    const delay = 1400 + Math.random() * 1200;
+    const delay = 800 + Math.random() * 1200;
     setTimeout(() => {
         if (state.phase === 'wait' && state.active) showHeart();
     }, delay);
 }
 
 function showHeart() {
-    // Определяем тип раунда
     state.isScreamerRound = (state.round === state.screamerRound && !state.screamerHappened);
+    
+    // Reset round flags
     state.heartCaughtThisRound = false;
-    placeHeart();
+    state.returnedThisRound = false;
+    state.trajectory = [];
+    
+    // Сердце при скримере дальше от круга
+    placeHeart(state.isScreamerRound);
     
     state.startX = state.lastX;
     state.startY = state.lastY;
-    state.phase = 'toHeart';
     state.heartAt = Date.now();
     state.moveAt = 0;
     
     el.zone.className = 'hold-zone waiting';
-    el.heart.classList.remove('fading');
-    el.heart.classList.add('visible');
-    
-    // Таймер исчезновения сердца
-    clearTimeout(state.heartTimer);
-    state.heartTimer = setTimeout(() => {
-        if (state.phase === 'toHeart') {
-            // Не успел поймать!
-            el.heart.classList.add('fading');
-            setTimeout(() => missHeart(), 150);
-        }
-    }, HEART_TIMEOUT);
     
     if (state.isScreamerRound) {
+        // === СКРИМЕР! ===
+        
+        // Рандомный emoji если картинка не загрузилась
+        if (el.screamerEmoji) {
+            el.screamerEmoji.textContent = SCREAMER_EMOJIS[Math.floor(Math.random() * SCREAMER_EMOJIS.length)];
+        }
+        
         el.screamer.classList.add('active');
         playScream();
         if (navigator.vibrate) navigator.vibrate([200, 50, 200, 50, 300]);
+        
+        // Сердце появляется с ЗАДЕРЖКОЙ после скримера
+        setTimeout(() => {
+            state.phase = 'toHeart';
+            state.heartAt = Date.now(); // Обновляем время появления сердца
+            el.heart.classList.remove('fading');
+            el.heart.classList.add('visible');
+            
+            // Таймер исчезновения
+            clearTimeout(state.heartTimer);
+            state.heartTimer = setTimeout(() => {
+                if (state.phase === 'toHeart') {
+                    el.heart.classList.add('fading');
+                    setTimeout(() => missHeart(), 150);
+                }
+            }, HEART_TIMEOUT);
+        }, SCREAMER_HEART_DELAY);
+        
+        // Скрыть скример
         setTimeout(() => el.screamer.classList.remove('active'), 900);
         state.screamerHappened = true;
+        
+    } else {
+        // Обычное сердце
+        state.phase = 'toHeart';
+        el.heart.classList.remove('fading');
+        el.heart.classList.add('visible');
+        
+        clearTimeout(state.heartTimer);
+        state.heartTimer = setTimeout(() => {
+            if (state.phase === 'toHeart') {
+                el.heart.classList.add('fading');
+                setTimeout(() => missHeart(), 150);
+            }
+        }, HEART_TIMEOUT);
     }
 }
 
 function catchHeart(x, y) {
     if (state.phase !== 'toHeart') return;
     if (state.heartCaughtThisRound) return;
-
+    
     state.heartCaughtThisRound = true;
     state.phase = 'toZone';
-	
+    
     clearTimeout(state.heartTimer);
     
     const now = Date.now();
@@ -358,31 +458,76 @@ function catchHeart(x, y) {
     state.catchX = x;
     state.catchY = y;
     
-    // Считаем метрики
     const startDelay = state.moveAt ? state.moveAt - state.heartAt : now - state.heartAt;
     const catchTime = now - state.heartAt;
     
-    state.phase = 'toZone';
     state.returnStartAt = now;
     
     el.heart.classList.remove('visible', 'fading');
     el.zone.className = 'hold-zone';
     el.instruction.textContent = '← В круг';
     
-    // Сохраняем промежуточные данные для этого раунда
-    state._currentRound = { startDelay, catchTime };
+    // Анализ траектории для метрик скримера
+    let metrics = { microFreeze: 0, directionError: 0, speedVariability: 0 };
+    
+    if (state.isScreamerRound && state.trajectory.length > 3) {
+        metrics = analyzeTrajectory(state.trajectory);
+    }
+    
+    state._currentRound = { startDelay, catchTime, ...metrics };
     
     if (state.isScreamerRound) {
         state.screamer.startDelay = startDelay;
         state.screamer.catchTime = catchTime;
+        state.screamer.microFreeze = metrics.microFreeze;
+        state.screamer.directionError = metrics.directionError;
+        state.screamer.speedVariability = metrics.speedVariability;
     }
+}
+
+function analyzeTrajectory(traj) {
+    if (traj.length < 3) return { microFreeze: 0, directionError: 0, speedVariability: 0 };
+    
+    // 1. Micro-freeze: пауза в начале движения
+    let microFreeze = 0;
+    for (let i = 1; i < Math.min(5, traj.length); i++) {
+        const gap = traj[i].t - traj[i-1].t;
+        if (gap > 80) { // Пауза больше 80мс
+            microFreeze = gap;
+            break;
+        }
+    }
+    
+    // 2. Direction error: среднее отклонение от направления к сердцу
+    let totalAngle = 0;
+    let angleCount = 0;
+    for (let i = 0; i < Math.min(10, traj.length); i++) {
+        if (traj[i].angle !== undefined && traj[i].speed > 50) { // Игнорируем медленные точки
+            totalAngle += traj[i].angle;
+            angleCount++;
+        }
+    }
+    const directionError = angleCount > 0 ? totalAngle / angleCount : 0;
+    
+    // 3. Speed variability: стандартное отклонение скорости
+    const speeds = traj.filter(p => p.speed > 0).map(p => p.speed);
+    let speedVariability = 0;
+    if (speeds.length > 2) {
+        const avgSpeed = speeds.reduce((a, b) => a + b, 0) / speeds.length;
+        const variance = speeds.reduce((sum, s) => sum + (s - avgSpeed) ** 2, 0) / speeds.length;
+        speedVariability = Math.sqrt(variance) / avgSpeed; // Коэффициент вариации
+    }
+    
+    return { microFreeze, directionError, speedVariability };
 }
 
 function returnedToZone() {
     if (state.phase !== 'toZone') return;
-
-    state.phase = 'wait'; // ❗ а не cooldown
-
+    if (state.returnedThisRound) return;
+    
+    state.returnedThisRound = true;
+    state.phase = 'cooldown'; // Временная блокировка
+    
     const now = Date.now();
     const returnTime = now - state.returnStartAt;
     
@@ -392,7 +537,6 @@ function returnedToZone() {
     el.zone.className = 'hold-zone active';
     el.instruction.textContent = '';
     
-    // Сохраняем полные данные раунда
     const roundData = {
         ...state._currentRound,
         returnTime
@@ -400,6 +544,7 @@ function returnedToZone() {
     
     if (state.isScreamerRound) {
         state.screamer.returnTime = returnTime;
+        state.isScreamerRound = false;
     } else if (!state.screamerHappened) {
         state.preCalib.push(roundData);
     } else {
@@ -408,27 +553,34 @@ function returnedToZone() {
     
     state.round++;
     
-    // Проверяем конец игры
     if (state.round >= TOTAL_HEARTS) {
         setTimeout(showResults, 400);
         return;
     }
     
     // Следующее сердце
-    state.phase = 'wait';
     setTimeout(() => {
-        if (state.phase === 'wait' && state.active) showHeart();
-    }, 600 + Math.random() * 800);
+        state.phase = 'wait';
+        if (state.active) {
+            setTimeout(() => {
+                if (state.phase === 'wait' && state.active) showHeart();
+            }, 400 + Math.random() * 600);
+        }
+    }, 100);
 }
 
 function missHeart() {
+    if (state.phase !== 'toHeart') return;
+    
     clearTimeout(state.heartTimer);
+    state.phase = 'wait';
     
     state.heartsMissed++;
     el.heart.classList.remove('visible', 'fading');
     
     if (state.isScreamerRound) {
         state.screamer.lost = true;
+        state.isScreamerRound = false;
     }
     
     state.round++;
@@ -438,8 +590,6 @@ function missHeart() {
         return;
     }
     
-    // Продолжаем
-    state.phase = 'wait';
     el.zone.className = 'hold-zone';
     el.instruction.textContent = 'Не успел! Снова в круг';
 }
@@ -453,7 +603,7 @@ function fail() {
     
     if (state.isScreamerRound) {
         state.screamer.lost = true;
-        state.screamerHappened = true;
+        state.isScreamerRound = false;
     }
     
     state.heartsMissed++;
@@ -478,7 +628,6 @@ function showResults() {
     document.removeEventListener('mousemove', onMouseMove);
     document.removeEventListener('mouseup', onMouseUp);
     
-    // Вычисляем средние метрики
     const pre = state.preCalib;
     const post = state.postCalib;
     const scr = state.screamer;
@@ -495,40 +644,46 @@ function showResults() {
         returnTime: post.length ? post.reduce((a,b) => a + b.returnTime, 0) / post.length : avgPre.returnTime
     };
     
-    // Рассчёт Score
+    // === РАСЧЁТ SCORE ===
     let score = 0;
     
-    // 1. Убрал палец / не поймал при скримере = сильный испуг
+    // 1. Потерял/не поймал при скримере
     if (scr.lost) {
-        score += 50;
-    } else {
-        // 2. Задержка старта при скримере vs калибровка (главная метрика!)
-        if (avgPre.startDelay > 0 && scr.startDelay > 0) {
-            const ratio = scr.startDelay / avgPre.startDelay;
-            if (ratio > 1.15) {
-                score += Math.min(30, Math.round((ratio - 1) * 50));
-            }
-        }
-        
-        // 3. Время поимки
-        if (avgPre.catchTime > 0 && scr.catchTime > 0) {
-            const ratio = scr.catchTime / avgPre.catchTime;
-            if (ratio > 1.2) {
-                score += Math.min(15, Math.round((ratio - 1) * 25));
-            }
-        }
-        
-        // 4. Время возврата
-        if (avgPre.returnTime > 0 && scr.returnTime > 0) {
-            const ratio = scr.returnTime / avgPre.returnTime;
-            if (ratio > 1.2) {
-                score += Math.min(10, Math.round((ratio - 1) * 15));
-            }
+        score += 45;
+    }
+    
+    // 2. Задержка старта (главная метрика)
+    if (avgPre.startDelay > 0 && scr.startDelay > 0) {
+        const ratio = scr.startDelay / avgPre.startDelay;
+        if (ratio > 1.1) {
+            score += Math.min(25, Math.round((ratio - 1) * 40));
         }
     }
     
-    // 5. Бонус: сравнение post vs pre (восстановление)
-    // Если после скримера метрики хуже — человек ещё не отошёл
+    // 3. Micro-freeze (ступор)
+    if (scr.microFreeze > 80) {
+        score += Math.min(10, Math.round(scr.microFreeze / 30));
+    }
+    
+    // 4. Direction error (отклонение траектории)
+    if (scr.directionError > 15) {
+        score += Math.min(10, Math.round(scr.directionError / 5));
+    }
+    
+    // 5. Speed variability (нестабильность скорости)
+    if (scr.speedVariability > 0.5) {
+        score += Math.min(8, Math.round(scr.speedVariability * 10));
+    }
+    
+    // 6. Время поимки
+    if (avgPre.catchTime > 0 && scr.catchTime > 0) {
+        const ratio = scr.catchTime / avgPre.catchTime;
+        if (ratio > 1.15) {
+            score += Math.min(10, Math.round((ratio - 1) * 20));
+        }
+    }
+    
+    // 7. Восстановление после скримера
     if (avgPost.startDelay > avgPre.startDelay * 1.1) {
         score += 5;
     }
@@ -551,13 +706,11 @@ function showResults() {
         label = '📱💨 Максимальный испуг!';
     }
     
-    // Отображение
     el.score.textContent = score;
     el.scoreFill.style.width = score + '%';
     el.label.textContent = label;
     el.heartsResult.textContent = `Поймано сердец: ${state.heartsCaught} из ${TOTAL_HEARTS}`;
     
-    // Отправка данных
     sendData(score, avgPre, avgPost, scr);
     
     show('results');
@@ -569,28 +722,26 @@ function sendData(score, avgPre, avgPost, scr) {
         hearts_caught: state.heartsCaught,
         hearts_total: TOTAL_HEARTS,
         
-        // Pre-screamer calibration averages
         pre_start_delay: Math.round(avgPre.startDelay),
         pre_catch_time: Math.round(avgPre.catchTime),
         pre_return_time: Math.round(avgPre.returnTime),
         
-        // Screamer round
         scream_start_delay: Math.round(scr.startDelay),
         scream_catch_time: Math.round(scr.catchTime),
         scream_return_time: Math.round(scr.returnTime),
         scream_lost: scr.lost,
+        scream_micro_freeze: Math.round(scr.microFreeze),
+        scream_direction_error: Math.round(scr.directionError),
+        scream_speed_variability: Math.round(scr.speedVariability * 100) / 100,
         
-        // Post-screamer averages
         post_start_delay: Math.round(avgPost.startDelay),
         post_catch_time: Math.round(avgPost.catchTime),
         post_return_time: Math.round(avgPost.returnTime),
         
-        // Raw data
         raw_pre_calib: state.preCalib,
         raw_post_calib: state.postCalib,
         raw_screamer: scr,
         
-        // Meta
         input_type: state.isMouse ? 'mouse' : 'touch',
         screamer_round: state.screamerRound + 1,
         device_info: navigator.userAgent
@@ -600,12 +751,13 @@ function sendData(score, avgPre, avgPost, scr) {
         tg.sendData(JSON.stringify(data));
     } else {
         console.log('Game result:', data);
-        // Debug output for testing
         console.table({
             'Pre startDelay': avgPre.startDelay.toFixed(0) + ' ms',
             'Scream startDelay': scr.startDelay.toFixed(0) + ' ms',
-            'Post startDelay': avgPost.startDelay.toFixed(0) + ' ms',
-            'Ratio': scr.startDelay ? (scr.startDelay / avgPre.startDelay).toFixed(2) : 'N/A'
+            'Micro-freeze': scr.microFreeze.toFixed(0) + ' ms',
+            'Direction error': scr.directionError.toFixed(1) + '°',
+            'Speed variability': (scr.speedVariability * 100).toFixed(0) + '%',
+            'Score': score
         });
     }
 }

@@ -8,6 +8,9 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- Background Image -->
+    <div class="background-image"></div>
+
     <!-- Atmosphere -->
     <div class="atmosphere">
         <div class="noise"></div>
@@ -22,42 +25,46 @@
 
     <!-- Warning -->
     <div id="warning" class="screen active">
-        <div class="icon">⚠️</div>
-        <h1>Внимание</h1>
-        <p>
-            Эта игра содержит <span class="highlight">пугающие моменты</span>, 
-            громкие звуки и вспышки.
-        </p>
-        <p style="margin-top: 15px;">
-            Не рекомендуется людям с <span class="highlight">эпилепсией</span>, 
-            болезнями сердца и беременным.
-        </p>
-        <div class="headphones-tip">
-            <span>🎧</span>
-            Надень наушники для полного погружения
+        <div class="content-card">
+            <div class="icon">⚠️</div>
+            <h1>Внимание</h1>
+            <p>
+                Эта игра содержит <span class="highlight">пугающие моменты</span>, 
+                громкие звуки и вспышки.
+            </p>
+            <p>
+                Не рекомендуется людям с <span class="highlight">эпилепсией</span>, 
+                болезнями сердца и беременным.
+            </p>
+            <div class="headphones-tip">
+                <span>🎧</span>
+                Надень наушники для полного погружения
+            </div>
+            <button class="btn" onclick="showTutorial()">Понятно</button>
         </div>
-        <button class="btn" onclick="showTutorial()">Понятно</button>
     </div>
 
     <!-- Tutorial -->
     <div id="tutorial" class="screen">
-        <h2>Как играть</h2>
-        <div class="tutorial-steps">
-            <div class="step">
-                <div class="step-icon">👆</div>
-                <div class="step-text">Положи <strong>палец в круг</strong> в центре экрана</div>
+        <div class="content-card">
+            <h2>Как играть</h2>
+            <div class="tutorial-steps">
+                <div class="step">
+                    <div class="step-icon">👆</div>
+                    <div class="step-text">Положи <strong>палец в круг</strong> в центре экрана</div>
+                </div>
+                <div class="step">
+                    <div class="step-icon">❤️</div>
+                    <div class="step-text">Когда появится сердечко — <strong>быстро лови!</strong></div>
+                </div>
+                <div class="step">
+                    <div class="step-icon">↩️</div>
+                    <div class="step-text">Поймал — <strong>вернись в круг</strong></div>
+                </div>
             </div>
-            <div class="step">
-                <div class="step-icon">❤️</div>
-                <div class="step-text">Когда появится сердечко — <strong>быстро лови!</strong></div>
-            </div>
-            <div class="step">
-                <div class="step-icon">↩️</div>
-                <div class="step-text">Поймал — <strong>вернись в круг</strong></div>
-            </div>
+            <div class="rule">⚡ Не отрывай палец и лови быстрее!</div>
+            <button class="btn" onclick="startGame()">Начать</button>
         </div>
-        <div class="rule">⚡ Не отрывай палец и лови быстрее!</div>
-        <button class="btn" onclick="startGame()">Начать</button>
     </div>
 
     <!-- Game -->
