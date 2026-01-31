@@ -8,10 +8,7 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Background Image -->
     <div class="background-image"></div>
-
-    <!-- Atmosphere -->
     <div class="atmosphere">
         <div class="noise"></div>
         <div class="floating-shadow"></div>
@@ -20,7 +17,6 @@
         <div class="vignette"></div>
     </div>
 
-    <!-- Sound Toggle -->
     <div class="sound-btn" id="soundBtn">🔊</div>
 
     <!-- Warning -->
@@ -28,18 +24,9 @@
         <div class="content-card">
             <div class="icon">⚠️</div>
             <h1>Внимание</h1>
-            <p>
-                Эта игра содержит <span class="highlight">пугающие моменты</span>, 
-                громкие звуки и вспышки.
-            </p>
-            <p>
-                Не рекомендуется людям с <span class="highlight">эпилепсией</span>, 
-                болезнями сердца и беременным.
-            </p>
-            <div class="headphones-tip">
-                <span>🎧</span>
-                Надень наушники для полного погружения
-            </div>
+            <p>Эта игра содержит <span class="highlight">пугающие моменты</span>, громкие звуки и вспышки.</p>
+            <p>Не рекомендуется людям с <span class="highlight">эпилепсией</span>, болезнями сердца и беременным.</p>
+            <div class="headphones-tip"><span>🎧</span>Надень наушники для полного погружения</div>
             <button class="btn" onclick="showTutorial()">Понятно</button>
         </div>
     </div>
@@ -49,20 +36,11 @@
         <div class="content-card">
             <h2>Как играть</h2>
             <div class="tutorial-steps">
-                <div class="step">
-                    <div class="step-icon">👆</div>
-                    <div class="step-text">Положи <strong>палец в круг</strong> в центре экрана</div>
-                </div>
-                <div class="step">
-                    <div class="step-icon">❤️</div>
-                    <div class="step-text">Когда появится сердечко — <strong>быстро лови!</strong></div>
-                </div>
-                <div class="step">
-                    <div class="step-icon">↩️</div>
-                    <div class="step-text">Поймал — <strong>вернись в круг</strong></div>
-                </div>
+                <div class="step"><div class="step-icon">👆</div><div class="step-text">Положи <strong>палец в круг</strong> внизу экрана</div></div>
+                <div class="step"><div class="step-icon">❤️</div><div class="step-text">Сердечко появится сверху — <strong>быстро лови!</strong></div></div>
+                <div class="step"><div class="step-icon">↩️</div><div class="step-text">Поймал — <strong>вернись в круг</strong></div></div>
             </div>
-            <div class="rule">⚡ Не отрывай палец и лови быстрее!</div>
+            <div class="rule">⚡ Не отрывай палец от экрана!</div>
             <button class="btn" onclick="startGame()">Начать</button>
         </div>
     </div>
@@ -70,24 +48,28 @@
     <!-- Game -->
     <div id="game" class="screen">
         <div class="game-ui">
-            <div class="hearts-counter" id="heartsCounter">❤️ 0</div>
+            <div class="hearts-counter" id="heartsCounter">❤️ 0/12</div>
         </div>
-        
         <div class="instruction" id="instruction">Положи палец в круг</div>
-        
-        <div class="hold-zone" id="zone">
-            <div class="zone-dot"></div>
-        </div>
-        
+
+        <div class="hold-zone" id="zone"><div class="zone-dot"></div></div>
+
+        <!-- Real Screamer -->
         <div class="screamer" id="screamer">
-            <img src="assets/images/screamer.jpg" class="screamer-img" id="screamerImg" 
+            <img src="assets/images/screamer.jpg" class="screamer-img" id="screamerImg"
                  onerror="this.style.display='none'; document.getElementById('screamerEmoji').style.display='block';">
             <div class="screamer-emoji" id="screamerEmoji" style="display:none;">👻</div>
         </div>
-        
+
+        <!-- Fake Screamer (Kitty) -->
+        <div class="fake-screamer" id="fakeScreamer">
+            <img src="assets/images/kitty.png" class="kitty-img" id="kittyImg"
+                 onerror="this.style.display='none'; document.getElementById('kittyEmoji').style.display='block';">
+            <div class="kitty-emoji" id="kittyEmoji" style="display:none;">😺</div>
+        </div>
+
         <div class="heart" id="heart">❤️</div>
         <div class="pointer" id="pointer"></div>
-        
         <div class="desktop-hint">🖱️ Удерживай левую кнопку мыши</div>
     </div>
 
@@ -98,18 +80,14 @@
             <div class="score" id="score">0</div>
             <div class="score-bar">
                 <div class="score-fill" id="scoreFill"></div>
-                <div class="score-labels">
-                    <span>🤖</span>
-                    <span>😰</span>
-                    <span>📱💨</span>
-                </div>
+                <div class="score-labels"><span>🤖</span><span>😰</span><span>📱💨</span></div>
             </div>
             <div class="label" id="label"></div>
             <div class="hearts-result" id="heartsResult"></div>
             <div class="score-explanation">
                 <p><strong>0</strong> — железные нервы, ничего не берёт</p>
                 <p><strong>100</strong> — максимальный испуг</p>
-                <p style="margin-top: 10px; color: #22c55e; font-size: 11px;">✅ Результат сохранён автоматически</p>
+                <p style="margin-top:10px;color:#22c55e;font-size:11px;">✅ Результат сохранён</p>
             </div>
         </div>
         <button class="btn" onclick="restart()">Ещё раз</button>
@@ -117,15 +95,10 @@
     </div>
 
     <!-- Audio -->
-    <audio id="ambientSound" loop preload="auto">
-        <source src="assets/sounds/ambient.mp3" type="audio/mpeg">
-    </audio>
-    <audio id="laughSound" preload="auto">
-        <source src="assets/sounds/laugh.mp3" type="audio/mpeg">
-    </audio>
-    <audio id="screamSound" preload="auto">
-        <source src="assets/sounds/scream.mp3" type="audio/mpeg">
-    </audio>
+    <audio id="ambientSound" loop preload="auto"><source src="assets/sounds/ambient.mp3" type="audio/mpeg"></audio>
+    <audio id="laughSound" preload="auto"><source src="assets/sounds/laugh.mp3" type="audio/mpeg"></audio>
+    <audio id="screamSound" preload="auto"><source src="assets/sounds/scream.mp3" type="audio/mpeg"></audio>
+    <audio id="meowSound" preload="auto"><source src="assets/sounds/meow.mp3" type="audio/mpeg"></audio>
 
     <script src="script.js"></script>
 </body>
