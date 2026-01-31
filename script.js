@@ -569,9 +569,7 @@ function analyzeTrajectory(traj) {
     
     return { microFreeze, directionError, speedVariability, totalJerk };
 }
-    
-    return { microFreeze, directionError, speedVariability };
-}
+
 
 function returnedToZone() {
     if (state.phase !== 'toZone') return;
