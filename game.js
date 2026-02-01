@@ -127,6 +127,7 @@ function show(name) {
 function showTutorial() { playLaugh(); playAmbient(); show('tutorial'); }
 
 function startGame() {
+    atmosphere.unlock(); // Resume AudioContext after user gesture
     show('game');
     Object.assign(state, {
         phase:'wait', round:0, active:false,
