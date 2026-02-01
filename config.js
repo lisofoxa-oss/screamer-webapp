@@ -43,12 +43,10 @@ const CONFIG = {
         'assets/images/bg2.jpg',
         'assets/images/bg3.jpg',
         'assets/images/bg2.jpg',
-        'assets/images/screamer.jpg',
         'assets/images/bg3.jpg',
         'assets/images/background.jpg',
         'assets/images/bg2.jpg',
         'assets/images/bg3.jpg',
-        'assets/images/screamer.jpg',
     ],
 
     // --- Creepy text ---
@@ -79,7 +77,7 @@ const CONFIG = {
         'assets/images/background.jpg',
         'assets/images/bg2.jpg',
         'assets/images/bg3.jpg',
-        'assets/images/screamer.jpg',
+        'assets/images/screamer.png',
         'assets/images/kitty.png',
     ],
 

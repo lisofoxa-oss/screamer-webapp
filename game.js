@@ -968,9 +968,10 @@ function showResults() {
     const scr = state.realScreamer || { lost: true };
     const fake = state.fakeScreamer;
     const avgPre = avgMetrics([...state.preCalib, ...state.midCalib]);
+    const avgMid = state.midCalib.length > 0 ? avgMetrics(state.midCalib) : null;
     const avgPost = avgMetrics(state.postCalib);
 
-    const { score, details } = computeScore(scr, fake, avgPre, avgPost);
+    const { score, details } = computeScore(scr, fake, avgPre, avgPost, avgMid);
 
     console.log('=== SCORE BREAKDOWN ===');
     details.forEach(d => console.log('  ' + d));
