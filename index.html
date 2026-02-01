@@ -42,7 +42,13 @@
         </div>
     </div>
 
-    <!-- Tutorial -->
+    <!-- Intro — "Чёрная роза" -->
+    <div id="intro" class="screen">
+        <div class="intro-bg" id="introBg"></div>
+        <div class="intro-text" id="introText">чёрная роза</div>
+    </div>
+
+    <!-- Tutorial (правила) -->
     <div id="tutorial" class="screen">
         <div class="content-card">
             <h2>Как играть</h2>
@@ -52,27 +58,30 @@
                 <div class="step"><div class="step-icon">↩️</div><div class="step-text">Поймал — <strong>вернись в круг</strong></div></div>
             </div>
             <div class="rule">⚡ Не отрывай палец от экрана!</div>
-            <button class="btn" onclick="startGame()">Начать</button>
+            <button class="btn" onclick="startTraining()">Тренировка</button>
         </div>
     </div>
 
-    <!-- Game (убран счётчик сердец) -->
+    <!-- Game -->
     <div id="game" class="screen">
         <div class="instruction" id="instruction">Положи палец в круг</div>
 
-        <!-- Creepy intermission text -->
+        <!-- Training hint overlay -->
+        <div class="train-hint" id="trainHint"></div>
+
+        <!-- Creepy text -->
         <div class="creepy-text" id="creepyText"></div>
 
         <div class="hold-zone" id="zone"><div class="zone-dot"></div></div>
 
-        <!-- Real Screamer -->
+        <!-- Screamer -->
         <div class="screamer" id="screamer">
             <img src="assets/images/screamer.png" class="screamer-img" id="screamerImg"
                  onerror="this.style.display='none'; document.getElementById('screamerEmoji').style.display='block';">
             <div class="screamer-emoji" id="screamerEmoji" style="display:none;">👻</div>
         </div>
 
-        <!-- Fake Screamer (Kitty) -->
+        <!-- Fake Screamer -->
         <div class="fake-screamer" id="fakeScreamer">
             <img src="assets/images/kitty.png" class="kitty-img" id="kittyImg"
                  onerror="this.style.display='none'; document.getElementById('kittyEmoji').style.display='block';">
@@ -82,6 +91,17 @@
         <div class="heart" id="heart">❤️</div>
         <div class="pointer" id="pointer"></div>
         <div class="desktop-hint">🖱️ Удерживай левую кнопку мыши</div>
+    </div>
+
+    <!-- Training complete -->
+    <div id="trainDone" class="screen">
+        <div class="content-card">
+            <div class="icon">✅</div>
+            <h2>Отлично!</h2>
+            <p>Теперь ты знаешь как играть.</p>
+            <p style="font-size:13px;color:#999;margin-top:10px;">Игра начнётся по-настоящему</p>
+            <button class="btn" onclick="startGameFromTraining()">Начать</button>
+        </div>
     </div>
 
     <!-- Results -->

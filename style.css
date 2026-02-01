@@ -9,11 +9,9 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
     background:var(--bg-dark); color:var(--text); min-height:100vh; overflow:hidden;
     touch-action:none; cursor:default; }
 
-/* Background */
 .background-image { position:fixed; inset:0; background:url('assets/images/background.jpg') center/cover; z-index:-2;
     transition:filter 3s; }
 
-/* Atmosphere */
 .atmosphere { position:fixed; inset:0; pointer-events:none; z-index:0; }
 .noise { position:absolute; width:100%; height:100%; opacity:0;
     background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -34,7 +32,31 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
     min-height:100vh; padding:25px; text-align:center; position:relative; z-index:1; }
 .screen.active { display:flex; }
 
-/* === LOADING SCREEN === */
+/* === INTRO === */
+#intro { background:#000; padding:0; }
+.intro-bg {
+    position:fixed; inset:0;
+    background:url('assets/images/bg2.jpg') center/cover;
+    opacity:0; transition:opacity 0.08s;
+    z-index:1;
+}
+.intro-text {
+    position:relative; z-index:2;
+    font-family:Georgia,'Times New Roman',serif;
+    font-size:32px; font-weight:400; font-style:italic;
+    color:#8b0000;
+    text-shadow:
+        0 0 12px rgba(139,0,0,0.95),
+        0 0 30px rgba(139,0,0,0.6),
+        0 0 60px rgba(100,0,0,0.35),
+        0 3px 10px rgba(0,0,0,0.95);
+    letter-spacing:4px;
+    text-transform:lowercase;
+    opacity:0;
+    transition:opacity 0.8s ease;
+}
+
+/* === LOADING === */
 .loading-content { text-align:center; }
 .loading-heart { font-size:60px; animation:loadPulse 1.2s ease-in-out infinite; }
 @keyframes loadPulse { 0%,100%{transform:scale(1);opacity:.7} 50%{transform:scale(1.15);opacity:1} }
@@ -73,6 +95,36 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
 .btn-secondary { background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.3);
     color:var(--text); box-shadow:none; padding:12px 30px; font-size:14px; margin-top:12px; }
 
+/* === TRAINING HINT === */
+.train-hint {
+    position:fixed; bottom:28%; left:50%; transform:translateX(-50%);
+    font-size:17px; font-weight:600; color:#fff;
+    text-shadow:0 2px 15px rgba(0,0,0,.9);
+    background:rgba(0,0,0,0.55); backdrop-filter:blur(5px); -webkit-backdrop-filter:blur(5px);
+    padding:12px 22px; border-radius:14px;
+    border:1px solid rgba(255,255,255,0.15);
+    z-index:90; pointer-events:none;
+    opacity:0; transition:opacity 0.4s;
+    white-space:nowrap;
+}
+.train-hint.visible { opacity:1; }
+
+/* Training pulsing zone */
+.hold-zone.train-pulse {
+    border-color:var(--accent);
+    border-style:solid;
+    animation:trainPulse 1.2s ease-in-out infinite;
+}
+@keyframes trainPulse {
+    0%,100% { box-shadow:0 0 20px rgba(139,92,246,0.3); }
+    50% { box-shadow:0 0 40px rgba(139,92,246,0.7); }
+}
+
+/* Train Done */
+#trainDone .icon { font-size:60px; margin-bottom:15px; }
+#trainDone h2 { font-size:20px; margin-bottom:10px; }
+#trainDone p { font-size:15px; color:var(--text-dim); }
+
 /* Game */
 #game { background:transparent; }
 .instruction { position:absolute; top:50px; left:20px; right:20px; font-size:16px; color:#fff; z-index:10;
@@ -94,12 +146,8 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
     text-transform:lowercase;
     white-space:nowrap;
 }
-.creepy-text.visible {
-    animation:creepyIn 0.4s steps(5) forwards;
-}
-.creepy-text.fade-out {
-    animation:creepyOut 0.35s steps(4) forwards;
-}
+.creepy-text.visible { animation:creepyIn 0.4s steps(5) forwards; }
+.creepy-text.fade-out { animation:creepyOut 0.35s steps(4) forwards; }
 @keyframes creepyIn {
     0%   { opacity:0;    transform:translate(-50%,-50%) scale(0.90); }
     20%  { opacity:0.75; transform:translate(-50%,-50%) scale(1.03); }
@@ -137,7 +185,7 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
     transform:translate(-50%,-50%); display:none; z-index:160; box-shadow:0 0 15px rgba(239,68,68,.5); }
 .pointer.active { display:block; }
 
-/* Real Screamer */
+/* Screamer */
 .screamer { position:fixed; inset:0; background:#000; display:none; align-items:center;
     justify-content:center; z-index:100; pointer-events:none; overflow:hidden; }
 .screamer.active { display:flex; }
@@ -147,7 +195,7 @@ body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
     40%{transform:translate(5px,-3px) scale(.98)} 60%{transform:translate(-4px,-5px) scale(1.01)} 80%{transform:translate(4px,3px) scale(.99)} }
 @keyframes screamFlicker { 0%,100%{opacity:1;filter:brightness(1)} 30%{opacity:.93;filter:brightness(1.15)} 60%{opacity:.97;filter:brightness(.9)} }
 
-/* Fake Screamer (Kitty) */
+/* Fake Screamer */
 .fake-screamer { position:fixed; inset:0; background:rgba(255,240,220,0.95); display:none; align-items:center;
     justify-content:center; z-index:100; pointer-events:none; overflow:hidden; }
 .fake-screamer.active { display:flex; }

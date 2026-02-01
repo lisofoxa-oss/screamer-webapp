@@ -1,13 +1,8 @@
 // ============================================================
-// atmosphere.js v4 — Реально ощутимые эффекты
+// atmosphere.js v5 — Фикс masterGain + усиленные эффекты
 //
-// v4 изменения:
-// - CALM = полностью чисто (0 grain, 0 tint, полная яркость)
-// - TENSION = очень заметно (тёмный, красный, grain шумит)
-// - Контраст между фазами ОГРОМНЫЙ — чтобы чувствовался
-// - Тишина: жёсткий cut, минимум 4 раунда, почти чёрный экран
-// - Переходы в страх: мгновенные (0.5s), обратно: медленные (5s)
-// - bgFilter усилен: brightness до 0.2 в пике
+// ИСПРАВЛЕНО: masterGain оставался на 0 после _audioStutter()
+// Теперь: восстанавливается через 0.6s, и в start(), и в setPhase()
 // ============================================================
 
 const ATM = {
@@ -18,9 +13,6 @@ const ATM = {
         D: { name: 'silence',      weight: 15, fakeRound: [5,6], realRound: [9,10], buildup: 'silence' },
     },
 
-    // ===== КОНТРАСТ УСИЛЕН =====
-    // calm = чисто, светло, уютно
-    // tension = тёмное, красное, шумное
     PHASES: {
         calm:       { drone:0.04, piano:0.30, heart:0.00, texture:0.00,
                       grain:0.0,  grainSpeed:0.3, vignette:0.60, scanlines:0.00,
@@ -104,7 +96,6 @@ class AtmosphereEngine {
         this._injectCSS();
     }
 
-    // === SCENARIO ===
     pickScenario() {
         const total = Object.values(ATM.SCENARIOS).reduce((s, v) => s + v.weight, 0);
         let r = Math.random() * total;
@@ -139,6 +130,10 @@ class AtmosphereEngine {
         this._silenceStutterDone = false;
 
         this._initWebAudio();
+
+        // *** FIX: восстановить masterGain при старте ***
+        this._restoreMasterGain();
+
         this.setPhase('calm');
         this._startDrift();
         this._startBgFlash();
@@ -157,6 +152,16 @@ class AtmosphereEngine {
         if (this.userInteracted) return;
         this.userInteracted = true;
         if (this.ctx?.state === 'suspended') this.ctx.resume();
+    }
+
+    // *** FIX: восстановление masterGain ***
+    _restoreMasterGain() {
+        if (!this.ctx || !this.masterGain) return;
+        const now = this.ctx.currentTime;
+        const g = this.masterGain.gain;
+        g.cancelScheduledValues(now);
+        g.setValueAtTime(g.value, now);
+        g.linearRampToValueAtTime(1.0, now + 0.1);
     }
 
     // === WEB AUDIO ===
@@ -197,7 +202,7 @@ class AtmosphereEngine {
 
             let source = null;
             try { source = this.ctx.createMediaElementSource(element); source.connect(gain); }
-            catch(e) { /* already connected */ }
+            catch(e) {}
 
             this.layers[def.name] = { gain, element, source, loop: !!def.loop };
         });
@@ -213,7 +218,6 @@ class AtmosphereEngine {
         } catch(e) {}
     }
 
-    // === LAYER CONTROL ===
     _fadeLayer(name, target, ms = 2000) {
         const layer = this.layers[name];
         if (!layer || !soundOn) return;
@@ -242,7 +246,6 @@ class AtmosphereEngine {
         }, 500);
     }
 
-    // === ONE-SHOT SOUNDS ===
     _playOneShot(name, volume = 0.04) {
         if (!this.ctx || !soundOn) return;
         const buf = this.oneShotBuffers[name];
@@ -255,7 +258,6 @@ class AtmosphereEngine {
         pan.pan.value = (Math.random() - 0.5) * 1.6;
         src.connect(g); g.connect(pan); pan.connect(this.masterGain);
         src.start();
-        console.log(`👻 ${name} (pan:${pan.pan.value.toFixed(2)})`);
     }
 
     _scheduleOneShots() {
@@ -276,7 +278,6 @@ class AtmosphereEngine {
         loop();
     }
 
-    // === SYNTH FALLBACK ===
     _synthClick() {
         if (!this.ctx || !soundOn) return;
         const o = this.ctx.createOscillator(), g = this.ctx.createGain();
@@ -311,7 +312,7 @@ class AtmosphereEngine {
         else Math.random() < 0.5 ? this._synthClick() : this._synthCreak();
     }
 
-    // === AUDIO STUTTER ===
+    // === AUDIO STUTTER (FIXED) ===
     _audioStutter() {
         if (!this.ctx || !this.masterGain) return;
         const now = this.ctx.currentTime;
@@ -326,6 +327,16 @@ class AtmosphereEngine {
         g.linearRampToValueAtTime(0.0,       now + 0.38);
         g.linearRampToValueAtTime(cur * 0.05,now + 0.44);
         g.linearRampToValueAtTime(0.0,       now + 0.50);
+
+        // *** FIX: восстановить masterGain после stutter ***
+        // В silence фазе оставляем 0, но ставим таймер на восстановление
+        // чтобы при смене фазы звук вернулся
+        this._timer(() => {
+            // Не восстанавливаем если всё ещё в silence — звук не нужен
+            // Но ставим флаг что masterGain нужно поднять при выходе
+            this._masterGainKilled = true;
+        }, 600);
+
         this._visualStutter();
     }
 
@@ -361,28 +372,23 @@ class AtmosphereEngine {
         if (sc.buildup === 'none') {
             this.setPhase('calm');
         } else if (sc.buildup === 'silence') {
-            // Удлинённая тишина — ещё длиннее и заметнее
             const left = sc.realRound[0] - roundNum;
             if (left > 6) {
                 this.setPhase('calm');
             } else if (left > 4) {
                 this.setPhase('uneasy');
-                // Начинаем убирать звук плавно
                 this._fadeLayer('piano', 0.03, 18000);
                 this._fadeLayer('drone', 0.01, 18000);
             } else if (left > 1) {
-                // Жёсткий вход в тишину — stutter + резкое затемнение
                 if (!this._silenceStutterDone) {
                     this._silenceStutterDone = true;
                     this._audioStutter();
-                    // Резкое затемнение
                     this._setBgFilter('brightness(0.15) saturate(0.05)', '0.5s');
                     this._setTint(0.80, '0.5s');
                     this._setGrain(0.30, '0.5s');
                 }
                 this.setPhase('silence');
             } else {
-                // Глубочайшая тишина перед ударом
                 this.setPhase('silence');
                 this._setGrain(0.12, '2s');
                 this._setTint(0.85, '1s');
@@ -398,7 +404,6 @@ class AtmosphereEngine {
             else this.setPhase('false_calm');
         }
 
-        // False screamer visual (scenario C)
         if (sc.key === 'C' && !this.falseScreamerDone) {
             if (roundNum === sc.realRound[0] - 1 && Math.random() < 0.6) {
                 this._timer(() => this._falseScreamerVisual(), 500 + Math.random() * 2000);
@@ -413,26 +418,25 @@ class AtmosphereEngine {
         const p = ATM.PHASES[name];
         if (!p) return;
 
-        // Скорость: В СТРАХ = быстро (0.8s), ИЗ СТРАХА = медленно (5s)
+        // *** FIX: если masterGain убит stutter'ом — восстановить ***
+        if (this._masterGainKilled && name !== 'silence') {
+            this._restoreMasterGain();
+            this._masterGainKilled = false;
+            console.log('🔊 masterGain restored on phase change');
+        }
+
         const toScary = ['tension','pre_strike','silence','linger'].includes(name);
         const fromScary = ['tension','pre_strike','silence','linger'].includes(prevPhase);
         let audioMs, transMs;
 
         if (toScary && !fromScary) {
-            // Входим в страх — быстро!
-            audioMs = 800;
-            transMs = '0.8s';
+            audioMs = 800; transMs = '0.8s';
         } else if (!toScary && fromScary) {
-            // Выходим из страха — медленно, постепенно
-            audioMs = 5000;
-            transMs = '5s';
+            audioMs = 5000; transMs = '5s';
         } else if (toScary) {
-            // Уже в страхе, переход между фазами страха
-            audioMs = 1200;
-            transMs = '1.2s';
+            audioMs = 1200; transMs = '1.2s';
         } else {
-            audioMs = 3000;
-            transMs = '3s';
+            audioMs = 3000; transMs = '3s';
         }
 
         ['drone','piano','heart','texture'].forEach(n => {
@@ -465,7 +469,6 @@ class AtmosphereEngine {
         console.log(`🌙 Phase: ${prevPhase} → ${name} (${transMs})`);
     }
 
-    // === POST-SCREAMER LINGER ===
     startLinger() {
         this.lingerActive = true;
         this.setPhase('linger');
@@ -475,11 +478,9 @@ class AtmosphereEngine {
         }, 5000 + Math.random() * 5000);
     }
 
-    // === PRE-SCREAMER ===
     prepareScreamer(callback) {
         const sc = this.scenario;
         if (sc?.buildup === 'silence') {
-            // Резкий обрыв
             this._fadeAllLayers(0, 300);
             this._setBgFilter('brightness(0.08) saturate(0)', '0.3s');
             this._timer(() => this._timer(callback, 2500 + Math.random()*2500), 400);
@@ -505,8 +506,11 @@ class AtmosphereEngine {
         this._fadeLayer('riser', 0.30, 3000);
     }
 
-    // === SCREAMER MOMENT ===
     onScreamer() {
+        // *** FIX: восстановить masterGain перед скримером ***
+        this._restoreMasterGain();
+        this._masterGainKilled = false;
+
         this._fadeAllLayers(0, 150);
         this._flashRed(150);
         this._invertFlash(60);
@@ -522,11 +526,9 @@ class AtmosphereEngine {
         this._timer(() => this.startLinger(), 1000);
     }
 
-    // === FALSE SCREAMER VISUAL ===
     _falseScreamerVisual() {
         if (this.falseScreamerDone) return;
         this.falseScreamerDone = true;
-        console.log('👁️ False screamer visual');
         this._flashRed(80);
         this._timer(() => this._invertFlash(40), 30);
         if (this.bgEl) {
@@ -537,7 +539,6 @@ class AtmosphereEngine {
         }
     }
 
-    // === HAPTIC ===
     _haptic(type) {
         const tg = window.Telegram?.WebApp;
         if (tg?.HapticFeedback) {
@@ -568,13 +569,11 @@ class AtmosphereEngine {
         loop();
     }
 
-    // === POINTER PARANOIA ===
     _startPointerParanoia() {
         if (this.pointerParanoia) return;
         this.pointerParanoia = true;
         const ptr = document.getElementById('pointer');
         if (!ptr) return;
-
         const loop = () => {
             if (!this.pointerParanoia || !this.isActive) return;
             this._timer(() => {
@@ -601,20 +600,9 @@ class AtmosphereEngine {
     }
 
     // === VISUALS ===
-    _setGrain(o, transition = '3s') {
-        if (this.grainEl) {
-            this.grainEl.style.transition = `opacity ${transition}`;
-            this.grainEl.style.opacity = o;
-        }
-    }
-
-    _setGrainSpeed(speed) {
-        if (this.grainEl) {
-            this.grainEl.style.animationDuration = speed + 's';
-        }
-    }
-
-    _setVignette(r, transition = '3s') {
+    _setGrain(o, transition='3s') { if (this.grainEl) { this.grainEl.style.transition=`opacity ${transition}`; this.grainEl.style.opacity=o; } }
+    _setGrainSpeed(s) { if (this.grainEl) this.grainEl.style.animationDuration = s + 's'; }
+    _setVignette(r, transition='3s') {
         if (!this.vignetteEl) return;
         this.vignetteEl.style.transition = `background ${transition}`;
         this.vignetteEl.style.background = `radial-gradient(ellipse at center, transparent ${Math.round(r*100)}%, rgba(0,0,0,0.85) 100%)`;
@@ -626,13 +614,7 @@ class AtmosphereEngine {
         this.scanlines.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:50;opacity:0;transition:opacity 3s;';
         document.body.appendChild(this.scanlines);
     }
-
-    _setScanlines(o, transition = '3s') {
-        if (this.scanlines) {
-            this.scanlines.style.transition = `opacity ${transition}`;
-            this.scanlines.style.opacity = o;
-        }
-    }
+    _setScanlines(o, transition='3s') { if (this.scanlines) { this.scanlines.style.transition=`opacity ${transition}`; this.scanlines.style.opacity=o; } }
 
     _createTint() {
         this.tintEl = document.createElement('div');
@@ -640,20 +622,8 @@ class AtmosphereEngine {
         this.tintEl.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:49;opacity:0;transition:opacity 3s;background:radial-gradient(ellipse at center, rgba(50,0,0,0.20) 0%, rgba(80,0,0,0.55) 100%);';
         document.body.appendChild(this.tintEl);
     }
-
-    _setTint(o, transition = '3s') {
-        if (this.tintEl) {
-            this.tintEl.style.transition = `opacity ${transition}`;
-            this.tintEl.style.opacity = o;
-        }
-    }
-
-    _setBgFilter(filter, transition = '3s') {
-        if (this.bgEl) {
-            this.bgEl.style.transition = `filter ${transition}`;
-            this.bgEl.style.filter = filter === 'none' ? '' : filter;
-        }
-    }
+    _setTint(o, transition='3s') { if (this.tintEl) { this.tintEl.style.transition=`opacity ${transition}`; this.tintEl.style.opacity=o; } }
+    _setBgFilter(filter, transition='3s') { if (this.bgEl) { this.bgEl.style.transition=`filter ${transition}`; this.bgEl.style.filter = filter==='none' ? '' : filter; } }
 
     _flashRed(ms) {
         const d = document.createElement('div');
@@ -661,18 +631,8 @@ class AtmosphereEngine {
         document.body.appendChild(d);
         this._timer(() => d.remove(), ms);
     }
-
-    _invertFlash(ms) {
-        document.body.style.filter = 'invert(1)';
-        this._timer(() => { document.body.style.filter = ''; }, ms);
-    }
-
-    _screenShake(ms) {
-        const g = document.getElementById('game');
-        if (!g) return;
-        g.style.animation = `atmShake ${ms}ms linear`;
-        this._timer(() => { g.style.animation = ''; }, ms+10);
-    }
+    _invertFlash(ms) { document.body.style.filter='invert(1)'; this._timer(()=>{document.body.style.filter='';},ms); }
+    _screenShake(ms) { const g=document.getElementById('game'); if(!g)return; g.style.animation=`atmShake ${ms}ms linear`; this._timer(()=>{g.style.animation='';},ms+10); }
 
     _startBgFlash() {
         const loop = () => {
@@ -703,10 +663,7 @@ class AtmosphereEngine {
                     const base = ATM.PHASES[this.phase]?.piano || 0.20;
                     const cur = l.gain.gain.value;
                     const drift = (Math.random()-0.5) * base * 0.15;
-                    l.gain.gain.linearRampToValueAtTime(
-                        Math.max(0.01, Math.min(0.5, cur+drift)),
-                        this.ctx.currentTime + 2
-                    );
+                    l.gain.gain.linearRampToValueAtTime(Math.max(0.01,Math.min(0.5,cur+drift)), this.ctx.currentTime+2);
                 }
                 loop();
             }, 12000+Math.random()*8000);
@@ -719,10 +676,9 @@ class AtmosphereEngine {
             if (!this.isActive) return;
             this._timer(() => {
                 if (!this.isActive) return;
-                const max = 2 + Math.floor(Math.max(0, this.round-8)/8);
-                if (this.glitchesUsed >= max || this.phase === 'calm') { loop(); return; }
-                this._doGlitch();
-                loop();
+                const max = 2+Math.floor(Math.max(0,this.round-8)/8);
+                if (this.glitchesUsed>=max || this.phase==='calm') { loop(); return; }
+                this._doGlitch(); loop();
             }, 15000+Math.random()*30000);
         };
         loop();
@@ -733,85 +689,43 @@ class AtmosphereEngine {
         const t = document.querySelector(g.target);
         if (!t) return;
         this.glitchesUsed++;
-        console.log(`👾 Glitch: ${g.id}`);
         switch(g.effect) {
-            case 'text-replace':
-                const orig = t.textContent;
-                t.textContent = g.text;
-                this._timer(() => { t.textContent = orig; }, g.duration);
-                break;
-            case 'bg-swap':
-                if (this.bgEl) {
-                    this.bgEl.style.backgroundImage = "url('assets/images/bg2.jpg')";
-                    this._timer(() => { this.bgEl.style.backgroundImage = "url('assets/images/background.jpg')"; }, g.duration);
-                }
-                break;
-            case 'translate':
-                t.style.transform = `translate(${g.dx}px,${g.dy}px)`;
-                this._timer(() => { t.style.transform = ''; }, g.duration);
-                break;
+            case 'text-replace': const orig=t.textContent; t.textContent=g.text; this._timer(()=>{t.textContent=orig;},g.duration); break;
+            case 'bg-swap': if(this.bgEl){this.bgEl.style.backgroundImage="url('assets/images/bg2.jpg')";this._timer(()=>{this.bgEl.style.backgroundImage="url('assets/images/background.jpg')";},g.duration);} break;
+            case 'translate': t.style.transform=`translate(${g.dx}px,${g.dy}px)`;this._timer(()=>{t.style.transform='';},g.duration); break;
         }
     }
 
-    // === HEART ANOMALY ===
     getHeartAnomaly() {
         if (!this.isActive || this.round < 3) return null;
         if (['calm','post'].includes(this.phase)) return null;
-        const max = this.round > 8 ? 4 : 2;
-        if (this.anomaliesUsed >= max) return null;
-        if (Math.random() > (this.round > 8 ? 0.25 : 0.16)) return null;
+        const max = this.round>8?4:2;
+        if (this.anomaliesUsed>=max) return null;
+        if (Math.random() > (this.round>8?0.25:0.16)) return null;
         this.anomaliesUsed++;
-        const a = ATM.HEART_ANOMALIES[Math.floor(Math.random()*ATM.HEART_ANOMALIES.length)];
-        console.log(`💔 Anomaly: ${a.id}`);
-        return a;
+        return ATM.HEART_ANOMALIES[Math.floor(Math.random()*ATM.HEART_ANOMALIES.length)];
     }
 
-    // === TIMERS ===
     _timer(fn, delay) {
-        const id = setTimeout(() => {
-            this._timers = this._timers.filter(t => t !== id);
-            fn();
-        }, delay);
+        const id = setTimeout(() => { this._timers=this._timers.filter(t=>t!==id); fn(); }, delay);
         this._timers.push(id);
         return id;
     }
-
-    _clearTimers() {
-        this._timers.forEach(id => clearTimeout(id));
-        this._timers = [];
-    }
+    _clearTimers() { this._timers.forEach(id=>clearTimeout(id)); this._timers=[]; }
 
     _resetVisuals() {
-        this._setGrain(0.0, '1s');
-        this._setVignette(0.60, '1s');
-        this._setScanlines(0, '1s');
-        this._setTint(0, '1s');
-        this._setBgFilter('none', '1s');
-        this._setGrainSpeed(0.3);
-        if (this.bgEl) {
-            this.bgEl.style.transform = '';
-            this.bgEl.style.backgroundImage = "url('assets/images/background.jpg')";
-        }
-        document.body.style.filter = '';
+        this._setGrain(0.0,'1s'); this._setVignette(0.60,'1s'); this._setScanlines(0,'1s');
+        this._setTint(0,'1s'); this._setBgFilter('none','1s'); this._setGrainSpeed(0.3);
+        if(this.bgEl){this.bgEl.style.transform='';this.bgEl.style.backgroundImage="url('assets/images/background.jpg')";}
+        document.body.style.filter='';
     }
 
     _injectCSS() {
-        const s = document.createElement('style');
-        s.textContent = `
-            @keyframes atmShake {
-                0%,100%{transform:translate(0,0)}
-                10%{transform:translate(-5px,4px)} 20%{transform:translate(6px,-3px)}
-                30%{transform:translate(-4px,-5px)} 40%{transform:translate(5px,3px)}
-                50%{transform:translate(-3px,6px)} 60%{transform:translate(4px,-4px)}
-                70%{transform:translate(-6px,2px)} 80%{transform:translate(3px,-5px)}
-                90%{transform:translate(-2px,4px)}
-            }
-            .atm-scanlines {
-                background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.15) 2px,rgba(0,0,0,0.15) 3px);
-                animation:atmScanMove 4s linear infinite;
-            }
-            @keyframes atmScanMove { 0%{background-position:0 0} 100%{background-position:0 6px} }
-        `;
+        const s=document.createElement('style');
+        s.textContent=`
+            @keyframes atmShake{0%,100%{transform:translate(0,0)}10%{transform:translate(-5px,4px)}20%{transform:translate(6px,-3px)}30%{transform:translate(-4px,-5px)}40%{transform:translate(5px,3px)}50%{transform:translate(-3px,6px)}60%{transform:translate(4px,-4px)}70%{transform:translate(-6px,2px)}80%{transform:translate(3px,-5px)}90%{transform:translate(-2px,4px)}}
+            .atm-scanlines{background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.15) 2px,rgba(0,0,0,0.15) 3px);animation:atmScanMove 4s linear infinite;}
+            @keyframes atmScanMove{0%{background-position:0 0}100%{background-position:0 6px}}`;
         document.head.appendChild(s);
     }
 }
