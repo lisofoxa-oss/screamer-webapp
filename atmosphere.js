@@ -1,13 +1,13 @@
 // ============================================================
-// atmosphere.js v2 — Web Audio API + все улучшения
+// atmosphere.js v4 — Реально ощутимые эффекты
 //
-// 1. Web Audio Context + GainNodes (синхронизация, crossfade)
-// 2. Случайные шёпоты/дыхание (StereoPanner, one-shot)
-// 3. Grain + scanlines интенсивнее (animated, pre_strike)
-// 4. Pointer paranoia (курсор дёргается)
-// 5. Post-screamer linger (drone + slow heartbeat + grain)
-// 6. Haptic разнообразие (periodic, нарастание)
-// 7. False screamer visual only (flash без звука)
+// v4 изменения:
+// - CALM = полностью чисто (0 grain, 0 tint, полная яркость)
+// - TENSION = очень заметно (тёмный, красный, grain шумит)
+// - Контраст между фазами ОГРОМНЫЙ — чтобы чувствовался
+// - Тишина: жёсткий cut, минимум 4 раунда, почти чёрный экран
+// - Переходы в страх: мгновенные (0.5s), обратно: медленные (5s)
+// - bgFilter усилен: brightness до 0.2 в пике
 // ============================================================
 
 const ATM = {
@@ -18,29 +18,54 @@ const ATM = {
         D: { name: 'silence',      weight: 15, fakeRound: [5,6], realRound: [9,10], buildup: 'silence' },
     },
 
+    // ===== КОНТРАСТ УСИЛЕН =====
+    // calm = чисто, светло, уютно
+    // tension = тёмное, красное, шумное
     PHASES: {
-        calm:       { drone:0.05, piano:0.30, heart:0.00, texture:0.00, grain:0.03, vignette:0.50, scanlines:0.00 },
-        uneasy:     { drone:0.10, piano:0.25, heart:0.05, texture:0.03, grain:0.05, vignette:0.45, scanlines:0.00 },
-        tension:    { drone:0.20, piano:0.15, heart:0.20, texture:0.08, grain:0.10, vignette:0.30, scanlines:0.04 },
-        pre_strike: { drone:0.30, piano:0.05, heart:0.35, texture:0.12, grain:0.18, vignette:0.15, scanlines:0.08 },
-        false_calm: { drone:0.03, piano:0.10, heart:0.00, texture:0.00, grain:0.03, vignette:0.50, scanlines:0.00 },
-        silence:    { drone:0.00, piano:0.00, heart:0.00, texture:0.00, grain:0.12, vignette:0.15, scanlines:0.03 },
-        post:       { drone:0.08, piano:0.15, heart:0.00, texture:0.00, grain:0.06, vignette:0.40, scanlines:0.00 },
-        linger:     { drone:0.15, piano:0.00, heart:0.08, texture:0.04, grain:0.12, vignette:0.25, scanlines:0.02 },
+        calm:       { drone:0.04, piano:0.30, heart:0.00, texture:0.00,
+                      grain:0.0,  grainSpeed:0.3, vignette:0.60, scanlines:0.00,
+                      tint:0.00,  bgFilter:'none' },
+
+        uneasy:     { drone:0.18, piano:0.18, heart:0.12, texture:0.08,
+                      grain:0.12, grainSpeed:0.18, vignette:0.32, scanlines:0.06,
+                      tint:0.25,  bgFilter:'brightness(0.72) saturate(0.75)' },
+
+        tension:    { drone:0.38, piano:0.05, heart:0.35, texture:0.20,
+                      grain:0.30, grainSpeed:0.10, vignette:0.12, scanlines:0.18,
+                      tint:0.55,  bgFilter:'brightness(0.45) saturate(0.50) contrast(1.1)' },
+
+        pre_strike: { drone:0.48, piano:0.00, heart:0.50, texture:0.28,
+                      grain:0.42, grainSpeed:0.05, vignette:0.03, scanlines:0.28,
+                      tint:0.80,  bgFilter:'brightness(0.30) saturate(0.30) contrast(1.2)' },
+
+        false_calm: { drone:0.02, piano:0.08, heart:0.00, texture:0.00,
+                      grain:0.0,  grainSpeed:0.3, vignette:0.55, scanlines:0.00,
+                      tint:0.00,  bgFilter:'brightness(0.92)' },
+
+        silence:    { drone:0.00, piano:0.00, heart:0.00, texture:0.00,
+                      grain:0.25, grainSpeed:0.12, vignette:0.02, scanlines:0.12,
+                      tint:0.70,  bgFilter:'brightness(0.20) saturate(0.10) contrast(1.3)' },
+
+        post:       { drone:0.06, piano:0.20, heart:0.00, texture:0.00,
+                      grain:0.0,  grainSpeed:0.3, vignette:0.50, scanlines:0.00,
+                      tint:0.00,  bgFilter:'brightness(0.90)' },
+
+        linger:     { drone:0.28, piano:0.00, heart:0.20, texture:0.12,
+                      grain:0.25, grainSpeed:0.10, vignette:0.08, scanlines:0.10,
+                      tint:0.50,  bgFilter:'brightness(0.40) saturate(0.40)' },
     },
 
     HEART_ANOMALIES: [
-        { id: 'dark',    css: 'filter: brightness(0.82)' },
-        { id: 'flicker', css: 'opacity: 0', duration: 50 },
+        { id: 'dark',    css: 'filter: brightness(0.7)' },
+        { id: 'flicker', css: 'opacity: 0', duration: 60 },
         { id: 'drift',   dx: 2, dy: -1 },
-        { id: 'delay',   touchDelay: 35 },
+        { id: 'delay',   touchDelay: 40 },
     ],
 
     UI_GLITCHES: [
-        { id: 'counter_blink',    target: '#heartsCounter',    effect: 'opacity-blink', duration: 80 },
-        { id: 'instruction_dots', target: '#instruction',      effect: 'text-replace',  text: '...', duration: 150 },
-        { id: 'bg_flash',         target: '.background-image', effect: 'bg-swap',       duration: 33 },
-        { id: 'screen_shift',     target: '#game',             effect: 'translate',     dx: 1, dy: -1, duration: 200 },
+        { id: 'instruction_dots', target: '#instruction',      effect: 'text-replace',  text: '...', duration: 180 },
+        { id: 'bg_flash',         target: '.background-image', effect: 'bg-swap',       duration: 40 },
+        { id: 'screen_shift',     target: '#game',             effect: 'translate',     dx: 2, dy: -2, duration: 250 },
     ],
 };
 
@@ -66,13 +91,16 @@ class AtmosphereEngine {
         this.lingerActive = false;
         this.pointerParanoia = false;
         this._oneShotsScheduled = false;
+        this._silenceStutterDone = false;
 
         this.grainEl = document.querySelector('.noise');
         this.vignetteEl = document.querySelector('.vignette');
         this.bgEl = document.querySelector('.background-image');
         this.scanlines = null;
+        this.tintEl = null;
 
         this._createScanlines();
+        this._createTint();
         this._injectCSS();
     }
 
@@ -108,6 +136,7 @@ class AtmosphereEngine {
         this.lingerActive = false;
         this.pointerParanoia = false;
         this._oneShotsScheduled = false;
+        this._silenceStutterDone = false;
 
         this._initWebAudio();
         this.setPhase('calm');
@@ -193,7 +222,6 @@ class AtmosphereEngine {
         g.gain.cancelScheduledValues(now);
         g.gain.setValueAtTime(g.gain.value, now);
         g.gain.linearRampToValueAtTime(Math.max(0.001, target), now + ms/1000);
-
         if (target > 0.001 && layer.element.paused) layer.element.play().catch(()=>{});
     }
 
@@ -214,7 +242,7 @@ class AtmosphereEngine {
         }, 500);
     }
 
-    // === ONE-SHOT SOUNDS (StereoPanner) ===
+    // === ONE-SHOT SOUNDS ===
     _playOneShot(name, volume = 0.04) {
         if (!this.ctx || !soundOn) return;
         const buf = this.oneShotBuffers[name];
@@ -239,11 +267,11 @@ class AtmosphereEngine {
                 if (!this.isActive || !soundOn) { loop(); return; }
                 if (['calm','post','false_calm'].includes(this.phase)) { loop(); return; }
                 const sounds = Object.keys(this.oneShotBuffers);
-                if (sounds.length > 0 && Math.random() < 0.35) {
-                    this._playOneShot(sounds[Math.floor(Math.random() * sounds.length)], 0.03 + Math.random() * 0.03);
+                if (sounds.length > 0 && Math.random() < 0.40) {
+                    this._playOneShot(sounds[Math.floor(Math.random() * sounds.length)], 0.04 + Math.random() * 0.04);
                 }
                 loop();
-            }, 20000 + Math.random() * 40000);
+            }, 15000 + Math.random() * 30000);
         };
         loop();
     }
@@ -279,8 +307,44 @@ class AtmosphereEngine {
         if (this.singleSoundPlayed || !soundOn) return;
         this.singleSoundPlayed = true;
         const sounds = Object.keys(this.oneShotBuffers);
-        if (sounds.length > 0) this._playOneShot(sounds[Math.floor(Math.random()*sounds.length)], 0.04);
+        if (sounds.length > 0) this._playOneShot(sounds[Math.floor(Math.random()*sounds.length)], 0.05);
         else Math.random() < 0.5 ? this._synthClick() : this._synthCreak();
+    }
+
+    // === AUDIO STUTTER ===
+    _audioStutter() {
+        if (!this.ctx || !this.masterGain) return;
+        const now = this.ctx.currentTime;
+        const g = this.masterGain.gain;
+        const cur = g.value;
+        g.cancelScheduledValues(now);
+        g.setValueAtTime(cur, now);
+        g.linearRampToValueAtTime(0.0,       now + 0.06);
+        g.linearRampToValueAtTime(cur * 0.4, now + 0.12);
+        g.linearRampToValueAtTime(0.0,       now + 0.22);
+        g.linearRampToValueAtTime(cur * 0.2, now + 0.30);
+        g.linearRampToValueAtTime(0.0,       now + 0.38);
+        g.linearRampToValueAtTime(cur * 0.05,now + 0.44);
+        g.linearRampToValueAtTime(0.0,       now + 0.50);
+        this._visualStutter();
+    }
+
+    _visualStutter() {
+        if (!this.bgEl) return;
+        const orig = this.bgEl.style.filter || 'none';
+        this.bgEl.style.transition = 'none';
+        this.bgEl.style.filter = 'brightness(0.1) contrast(2.5)';
+        this._timer(() => {
+            this.bgEl.style.filter = orig;
+            this._timer(() => {
+                this.bgEl.style.transition = 'none';
+                this.bgEl.style.filter = 'brightness(0) contrast(3)';
+                this._timer(() => {
+                    this.bgEl.style.transition = 'filter 2s';
+                    this.bgEl.style.filter = 'brightness(0.20) saturate(0.10)';
+                }, 100);
+            }, 140);
+        }, 80);
     }
 
     // === ROUND HOOK ===
@@ -297,13 +361,34 @@ class AtmosphereEngine {
         if (sc.buildup === 'none') {
             this.setPhase('calm');
         } else if (sc.buildup === 'silence') {
+            // Удлинённая тишина — ещё длиннее и заметнее
             const left = sc.realRound[0] - roundNum;
-            if (left > 4) this.setPhase('calm');
-            else if (left > 2) {
+            if (left > 6) {
+                this.setPhase('calm');
+            } else if (left > 4) {
                 this.setPhase('uneasy');
-                this._fadeLayer('piano', 0.08, 10000);
-                this._fadeLayer('drone', 0.03, 10000);
-            } else this.setPhase('silence');
+                // Начинаем убирать звук плавно
+                this._fadeLayer('piano', 0.03, 18000);
+                this._fadeLayer('drone', 0.01, 18000);
+            } else if (left > 1) {
+                // Жёсткий вход в тишину — stutter + резкое затемнение
+                if (!this._silenceStutterDone) {
+                    this._silenceStutterDone = true;
+                    this._audioStutter();
+                    // Резкое затемнение
+                    this._setBgFilter('brightness(0.15) saturate(0.05)', '0.5s');
+                    this._setTint(0.80, '0.5s');
+                    this._setGrain(0.30, '0.5s');
+                }
+                this.setPhase('silence');
+            } else {
+                // Глубочайшая тишина перед ударом
+                this.setPhase('silence');
+                this._setGrain(0.12, '2s');
+                this._setTint(0.85, '1s');
+                this._setBgFilter('brightness(0.10) saturate(0.05) contrast(1.4)', '1.5s');
+                this._setVignette(0.0, '1s');
+            }
         } else {
             const left = sc.realRound[0] - roundNum;
             if (left > 5) this.setPhase('calm');
@@ -313,7 +398,7 @@ class AtmosphereEngine {
             else this.setPhase('false_calm');
         }
 
-        // [7] False screamer visual (scenario C, one round before real)
+        // False screamer visual (scenario C)
         if (sc.key === 'C' && !this.falseScreamerDone) {
             if (roundNum === sc.realRound[0] - 1 && Math.random() < 0.6) {
                 this._timer(() => this._falseScreamerVisual(), 500 + Math.random() * 2000);
@@ -323,55 +408,81 @@ class AtmosphereEngine {
 
     // === PHASE ===
     setPhase(name) {
+        const prevPhase = this.phase;
         this.phase = name;
         const p = ATM.PHASES[name];
         if (!p) return;
 
+        // Скорость: В СТРАХ = быстро (0.8s), ИЗ СТРАХА = медленно (5s)
+        const toScary = ['tension','pre_strike','silence','linger'].includes(name);
+        const fromScary = ['tension','pre_strike','silence','linger'].includes(prevPhase);
+        let audioMs, transMs;
+
+        if (toScary && !fromScary) {
+            // Входим в страх — быстро!
+            audioMs = 800;
+            transMs = '0.8s';
+        } else if (!toScary && fromScary) {
+            // Выходим из страха — медленно, постепенно
+            audioMs = 5000;
+            transMs = '5s';
+        } else if (toScary) {
+            // Уже в страхе, переход между фазами страха
+            audioMs = 1200;
+            transMs = '1.2s';
+        } else {
+            audioMs = 3000;
+            transMs = '3s';
+        }
+
         ['drone','piano','heart','texture'].forEach(n => {
-            if (p[n] !== undefined) this._fadeLayer(n, p[n], 3000);
+            if (p[n] !== undefined) this._fadeLayer(n, p[n], audioMs);
         });
 
-        this._setGrain(p.grain);
-        this._setVignette(p.vignette);
-        this._setScanlines(p.scanlines);
+        this._setGrain(p.grain, transMs);
+        this._setVignette(p.vignette, transMs);
+        this._setScanlines(p.scanlines, transMs);
+        this._setTint(p.tint, transMs);
+        this._setBgFilter(p.bgFilter, transMs);
+        if (p.grainSpeed) this._setGrainSpeed(p.grainSpeed);
 
-        if (name === 'tension')    this._setHeartbeatRate(1.15);
-        if (name === 'pre_strike') this._setHeartbeatRate(1.4);
-        if (name === 'linger')     this._setHeartbeatRate(0.7);
+        if (name === 'tension')    this._setHeartbeatRate(1.2);
+        if (name === 'pre_strike') this._setHeartbeatRate(1.5);
+        if (name === 'linger')     this._setHeartbeatRate(0.65);
         if (['calm','post','false_calm'].includes(name)) this._setHeartbeatRate(1.0);
 
         if (name === 'uneasy' && !this.singleSoundPlayed && Math.random() < 0.5)
-            this._timer(() => this._playSingleSound(), 3000 + Math.random() * 5000);
+            this._timer(() => this._playSingleSound(), 2000 + Math.random() * 4000);
 
         if (['uneasy','tension','pre_strike'].includes(name)) this._scheduleOneShots();
 
-        // [6] Haptic
         if (name === 'tension') this._hapticLoop('tension');
         if (name === 'pre_strike') this._hapticLoop('pre_strike');
 
-        // [4] Pointer paranoia
         if (['tension','pre_strike'].includes(name)) this._startPointerParanoia();
         else this._stopPointerParanoia();
 
-        console.log(`🌙 Phase: ${name}`);
+        console.log(`🌙 Phase: ${prevPhase} → ${name} (${transMs})`);
     }
 
-    // === [5] POST-SCREAMER LINGER ===
+    // === POST-SCREAMER LINGER ===
     startLinger() {
         this.lingerActive = true;
         this.setPhase('linger');
         this._timer(() => {
             this.lingerActive = false;
             this.setPhase('post');
-        }, 4000 + Math.random() * 4000);
+        }, 5000 + Math.random() * 5000);
     }
 
     // === PRE-SCREAMER ===
     prepareScreamer(callback) {
         const sc = this.scenario;
         if (sc?.buildup === 'silence') {
-            this._fadeAllLayers(0, 500);
-            this._timer(() => this._timer(callback, 2000 + Math.random()*2000), 600);
+            // Резкий обрыв
+            this._fadeAllLayers(0, 300);
+            this._setBgFilter('brightness(0.08) saturate(0)', '0.3s');
+            this._timer(() => this._timer(callback, 2500 + Math.random()*2500), 400);
         } else if (sc?.buildup === 'none') {
             callback();
         } else {
@@ -380,9 +491,9 @@ class AtmosphereEngine {
             this._timer(() => {
                 this.setPhase('false_calm');
                 this._timer(() => {
-                    this._fadeAllLayers(0, 1500);
-                    this._setGrain(0.03);
-                    this._timer(() => this._timer(callback, 1000+Math.random()*1500), 1600);
+                    this._fadeAllLayers(0, 1200);
+                    this._setGrain(0.02, '1s');
+                    this._timer(() => this._timer(callback, 1000+Math.random()*1500), 1300);
                 }, 1500);
             }, 2500);
         }
@@ -391,15 +502,15 @@ class AtmosphereEngine {
     _playRiser() {
         const l = this.layers.riser;
         if (l?.element) l.element.currentTime = 0;
-        this._fadeLayer('riser', 0.25, 3000);
+        this._fadeLayer('riser', 0.30, 3000);
     }
 
     // === SCREAMER MOMENT ===
     onScreamer() {
-        this._fadeAllLayers(0, 200);
-        this._flashRed(120);
-        this._invertFlash(50);
-        this._screenShake(70);
+        this._fadeAllLayers(0, 150);
+        this._flashRed(150);
+        this._invertFlash(60);
+        this._screenShake(80);
         this._haptic('heavy');
         this._timer(() => this._haptic('error'), 100);
         this._timer(() => this._haptic('heavy'), 200);
@@ -411,22 +522,22 @@ class AtmosphereEngine {
         this._timer(() => this.startLinger(), 1000);
     }
 
-    // === [7] FALSE SCREAMER VISUAL ===
+    // === FALSE SCREAMER VISUAL ===
     _falseScreamerVisual() {
         if (this.falseScreamerDone) return;
         this.falseScreamerDone = true;
         console.log('👁️ False screamer visual');
-        this._flashRed(60);
-        this._timer(() => this._invertFlash(30), 30);
+        this._flashRed(80);
+        this._timer(() => this._invertFlash(40), 30);
         if (this.bgEl) {
             this.bgEl.style.backgroundImage = "url('assets/images/bg2.jpg')";
             this._timer(() => {
                 if (this.bgEl) this.bgEl.style.backgroundImage = "url('assets/images/background.jpg')";
-            }, 80);
+            }, 100);
         }
     }
 
-    // === [6] HAPTIC ===
+    // === HAPTIC ===
     _haptic(type) {
         const tg = window.Telegram?.WebApp;
         if (tg?.HapticFeedback) {
@@ -443,8 +554,8 @@ class AtmosphereEngine {
         const loop = () => {
             if (!this.isActive || this.phase !== phase) return;
             const isTension = phase === 'tension';
-            const delay = isTension ? 4000+Math.random()*3000 : 2000+Math.random()*2000;
-            const chance = isTension ? 0.35 : 0.55;
+            const delay = isTension ? 3500+Math.random()*2500 : 1500+Math.random()*1500;
+            const chance = isTension ? 0.40 : 0.60;
             this._timer(() => {
                 if (this.phase !== phase) return;
                 if (Math.random() < chance) {
@@ -457,7 +568,7 @@ class AtmosphereEngine {
         loop();
     }
 
-    // === [4] POINTER PARANOIA ===
+    // === POINTER PARANOIA ===
     _startPointerParanoia() {
         if (this.pointerParanoia) return;
         this.pointerParanoia = true;
@@ -468,8 +579,8 @@ class AtmosphereEngine {
             if (!this.pointerParanoia || !this.isActive) return;
             this._timer(() => {
                 if (!this.pointerParanoia) return;
-                if (Math.random() < 0.3) {
-                    const dx = (Math.random()-0.5)*4, dy = (Math.random()-0.5)*4;
+                if (Math.random() < 0.35) {
+                    const dx = (Math.random()-0.5)*5, dy = (Math.random()-0.5)*5;
                     ptr.style.transition = 'none';
                     ptr.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
                     this._timer(() => {
@@ -478,7 +589,7 @@ class AtmosphereEngine {
                     }, 80 + Math.random()*70);
                 }
                 loop();
-            }, 3000+Math.random()*5000);
+            }, 2500+Math.random()*4000);
         };
         loop();
     }
@@ -490,12 +601,23 @@ class AtmosphereEngine {
     }
 
     // === VISUALS ===
-    _setGrain(o) { if (this.grainEl) { this.grainEl.style.transition='opacity 3s'; this.grainEl.style.opacity=o; } }
+    _setGrain(o, transition = '3s') {
+        if (this.grainEl) {
+            this.grainEl.style.transition = `opacity ${transition}`;
+            this.grainEl.style.opacity = o;
+        }
+    }
 
-    _setVignette(r) {
+    _setGrainSpeed(speed) {
+        if (this.grainEl) {
+            this.grainEl.style.animationDuration = speed + 's';
+        }
+    }
+
+    _setVignette(r, transition = '3s') {
         if (!this.vignetteEl) return;
-        this.vignetteEl.style.transition = 'background 3s';
-        this.vignetteEl.style.background = `radial-gradient(ellipse at center, transparent ${Math.round(r*100)}%, rgba(0,0,0,0.75) 100%)`;
+        this.vignetteEl.style.transition = `background ${transition}`;
+        this.vignetteEl.style.background = `radial-gradient(ellipse at center, transparent ${Math.round(r*100)}%, rgba(0,0,0,0.85) 100%)`;
     }
 
     _createScanlines() {
@@ -505,11 +627,37 @@ class AtmosphereEngine {
         document.body.appendChild(this.scanlines);
     }
 
-    _setScanlines(o) { if (this.scanlines) this.scanlines.style.opacity = o; }
+    _setScanlines(o, transition = '3s') {
+        if (this.scanlines) {
+            this.scanlines.style.transition = `opacity ${transition}`;
+            this.scanlines.style.opacity = o;
+        }
+    }
+
+    _createTint() {
+        this.tintEl = document.createElement('div');
+        this.tintEl.className = 'atm-tint';
+        this.tintEl.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:49;opacity:0;transition:opacity 3s;background:radial-gradient(ellipse at center, rgba(50,0,0,0.20) 0%, rgba(80,0,0,0.55) 100%);';
+        document.body.appendChild(this.tintEl);
+    }
+
+    _setTint(o, transition = '3s') {
+        if (this.tintEl) {
+            this.tintEl.style.transition = `opacity ${transition}`;
+            this.tintEl.style.opacity = o;
+        }
+    }
+
+    _setBgFilter(filter, transition = '3s') {
+        if (this.bgEl) {
+            this.bgEl.style.transition = `filter ${transition}`;
+            this.bgEl.style.filter = filter === 'none' ? '' : filter;
+        }
+    }
 
     _flashRed(ms) {
         const d = document.createElement('div');
-        d.style.cssText = 'position:fixed;inset:0;background:rgba(180,0,0,0.45);z-index:105;pointer-events:none;';
+        d.style.cssText = 'position:fixed;inset:0;background:rgba(180,0,0,0.50);z-index:105;pointer-events:none;';
         document.body.appendChild(d);
         this._timer(() => d.remove(), ms);
     }
@@ -537,10 +685,10 @@ class AtmosphereEngine {
                     this.bgEl.style.backgroundImage = "url('assets/images/bg2.jpg')";
                     this._timer(() => {
                         if (this.bgEl) this.bgEl.style.backgroundImage = "url('assets/images/background.jpg')";
-                    }, 16+Math.floor(Math.random()*17));
+                    }, 20+Math.floor(Math.random()*20));
                 }
                 loop();
-            }, 25000+Math.random()*35000);
+            }, 20000+Math.random()*30000);
         };
         loop();
     }
@@ -554,14 +702,14 @@ class AtmosphereEngine {
                 if (l) {
                     const base = ATM.PHASES[this.phase]?.piano || 0.20;
                     const cur = l.gain.gain.value;
-                    const drift = (Math.random()-0.5) * base * 0.12;
+                    const drift = (Math.random()-0.5) * base * 0.15;
                     l.gain.gain.linearRampToValueAtTime(
                         Math.max(0.01, Math.min(0.5, cur+drift)),
                         this.ctx.currentTime + 2
                     );
                 }
                 loop();
-            }, 15000+Math.random()*10000);
+            }, 12000+Math.random()*8000);
         };
         loop();
     }
@@ -571,11 +719,11 @@ class AtmosphereEngine {
             if (!this.isActive) return;
             this._timer(() => {
                 if (!this.isActive) return;
-                const max = 2 + Math.floor(Math.max(0, this.round-10)/10);
+                const max = 2 + Math.floor(Math.max(0, this.round-8)/8);
                 if (this.glitchesUsed >= max || this.phase === 'calm') { loop(); return; }
                 this._doGlitch();
                 loop();
-            }, 20000+Math.random()*40000);
+            }, 15000+Math.random()*30000);
         };
         loop();
     }
@@ -587,10 +735,6 @@ class AtmosphereEngine {
         this.glitchesUsed++;
         console.log(`👾 Glitch: ${g.id}`);
         switch(g.effect) {
-            case 'opacity-blink':
-                t.style.opacity = '0.3';
-                this._timer(() => { t.style.opacity = ''; }, g.duration);
-                break;
             case 'text-replace':
                 const orig = t.textContent;
                 t.textContent = g.text;
@@ -613,9 +757,9 @@ class AtmosphereEngine {
     getHeartAnomaly() {
         if (!this.isActive || this.round < 3) return null;
         if (['calm','post'].includes(this.phase)) return null;
-        const max = this.round > 10 ? 4 : 2;
+        const max = this.round > 8 ? 4 : 2;
         if (this.anomaliesUsed >= max) return null;
-        if (Math.random() > (this.round > 10 ? 0.22 : 0.14)) return null;
+        if (Math.random() > (this.round > 8 ? 0.25 : 0.16)) return null;
         this.anomaliesUsed++;
         const a = ATM.HEART_ANOMALIES[Math.floor(Math.random()*ATM.HEART_ANOMALIES.length)];
         console.log(`💔 Anomaly: ${a.id}`);
@@ -637,11 +781,13 @@ class AtmosphereEngine {
         this._timers = [];
     }
 
-    // === CLEANUP ===
     _resetVisuals() {
-        this._setGrain(0.03);
-        this._setVignette(0.50);
-        this._setScanlines(0);
+        this._setGrain(0.0, '1s');
+        this._setVignette(0.60, '1s');
+        this._setScanlines(0, '1s');
+        this._setTint(0, '1s');
+        this._setBgFilter('none', '1s');
+        this._setGrainSpeed(0.3);
         if (this.bgEl) {
             this.bgEl.style.transform = '';
             this.bgEl.style.backgroundImage = "url('assets/images/background.jpg')";
@@ -654,14 +800,14 @@ class AtmosphereEngine {
         s.textContent = `
             @keyframes atmShake {
                 0%,100%{transform:translate(0,0)}
-                10%{transform:translate(-4px,3px)} 20%{transform:translate(5px,-2px)}
-                30%{transform:translate(-3px,-4px)} 40%{transform:translate(4px,2px)}
-                50%{transform:translate(-2px,5px)} 60%{transform:translate(3px,-3px)}
-                70%{transform:translate(-5px,1px)} 80%{transform:translate(2px,-4px)}
-                90%{transform:translate(-1px,3px)}
+                10%{transform:translate(-5px,4px)} 20%{transform:translate(6px,-3px)}
+                30%{transform:translate(-4px,-5px)} 40%{transform:translate(5px,3px)}
+                50%{transform:translate(-3px,6px)} 60%{transform:translate(4px,-4px)}
+                70%{transform:translate(-6px,2px)} 80%{transform:translate(3px,-5px)}
+                90%{transform:translate(-2px,4px)}
             }
             .atm-scanlines {
-                background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.1) 2px,rgba(0,0,0,0.1) 3px);
+                background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.15) 2px,rgba(0,0,0,0.15) 3px);
                 animation:atmScanMove 4s linear infinite;
             }
             @keyframes atmScanMove { 0%{background-position:0 0} 100%{background-position:0 6px} }

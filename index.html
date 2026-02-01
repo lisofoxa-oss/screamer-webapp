@@ -27,7 +27,18 @@
             <p>Эта игра содержит <span class="highlight">пугающие моменты</span>, громкие звуки и вспышки.</p>
             <p>Не рекомендуется людям с <span class="highlight">эпилепсией</span>, болезнями сердца и беременным.</p>
             <div class="headphones-tip"><span>🎧</span>Надень наушники для полного погружения</div>
-            <button class="btn" onclick="showTutorial()">Понятно</button>
+            <button class="btn" onclick="startLoading()">Понятно</button>
+        </div>
+    </div>
+
+    <!-- Loading -->
+    <div id="loading" class="screen">
+        <div class="loading-content">
+            <div class="loading-heart">❤️</div>
+            <div class="loading-text" id="loadingText">Загрузка...</div>
+            <div class="loading-bar">
+                <div class="loading-fill" id="loadingFill"></div>
+            </div>
         </div>
     </div>
 
@@ -45,12 +56,12 @@
         </div>
     </div>
 
-    <!-- Game -->
+    <!-- Game (убран счётчик сердец) -->
     <div id="game" class="screen">
-        <div class="game-ui">
-            <div class="hearts-counter" id="heartsCounter">❤️ 0/12</div>
-        </div>
         <div class="instruction" id="instruction">Положи палец в круг</div>
+
+        <!-- Creepy intermission text -->
+        <div class="creepy-text" id="creepyText"></div>
 
         <div class="hold-zone" id="zone"><div class="zone-dot"></div></div>
 

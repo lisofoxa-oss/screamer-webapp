@@ -1,6 +1,11 @@
 // ============================================================
-// game.js — Основная логика игры
-// Зависит от: config.js, metrics.js (загружаются раньше)
+// game.js v4 — Прелоадер, без счётчика, больше кровавого текста
+//
+// Изменения:
+// - startLoading() загружает ВСЕ звуки и картинки до игры
+// - Убран счётчик сердец (heartsCounter)
+// - Кровавый текст чаще, с раунда 1
+// - placeHeart: строгие ограничения (не у краёв, не под UI)
 // ============================================================
 
 // === Telegram ===
@@ -51,9 +56,11 @@ function playScream() {
 // === DOM ===
 const $ = id => document.getElementById(id);
 const el = {
-    warning: $('warning'), tutorial: $('tutorial'), game: $('game'), results: $('results'),
+    warning: $('warning'), loading: $('loading'), tutorial: $('tutorial'),
+    game: $('game'), results: $('results'),
+    loadingText: $('loadingText'), loadingFill: $('loadingFill'),
     zone: $('zone'), heart: $('heart'), pointer: $('pointer'),
-    instruction: $('instruction'), heartsCounter: $('heartsCounter'),
+    instruction: $('instruction'), creepyText: $('creepyText'),
     screamer: $('screamer'), screamerImg: $('screamerImg'), screamerEmoji: $('screamerEmoji'),
     fakeScreamer: $('fakeScreamer'), kittyImg: $('kittyImg'), kittyEmoji: $('kittyEmoji'),
     score: $('score'), scoreFill: $('scoreFill'), label: $('label'), heartsResult: $('heartsResult')
@@ -74,7 +81,7 @@ const state = {
     heartsCaught: 0, heartsMissed: 0,
     preCalib: [], fakeScreamer: null, midCalib: [], realScreamer: null, postCalib: [],
     heartTimer: null, _currentRound: null,
-    lastSaveTime: 0
+    lastSaveTime: 0, creepyUsed: new Set()
 };
 
 // === Helpers ===
@@ -96,38 +103,130 @@ function angleBetween(v1x,v1y,v2x,v2y) {
     return Math.acos(Math.max(-1, Math.min(1, dot/(m1*m2)))) * 180/Math.PI;
 }
 
-function updateHeartsUI() {
-    el.heartsCounter.textContent = `❤️ ${state.heartsCaught}/${CONFIG.TOTAL_HEARTS}`;
-}
-
 function placeHeart(minDist) {
     const zone = zoneCenter();
-    const pad = 50;
-    const maxY = window.innerHeight * CONFIG.HEART_MAX_Y_RATIO;
+    const pad = CONFIG.HEART_EDGE_PAD || 55;
+    const minY = CONFIG.MIN_HEART_Y || 130;
+    const maxY = window.innerHeight * (CONFIG.MAX_HEART_Y_RATIO || 0.34);
     let attempts = 0;
     do {
         heartX = pad + Math.random() * (window.innerWidth - pad*2);
-        heartY = 50 + Math.random() * (maxY - 50);
+        heartY = minY + Math.random() * (maxY - minY);
         attempts++;
     } while ((dist(heartX, heartY, zone.x, zone.y) < minDist ||
               dist(heartX, heartY, state.lastX, state.lastY) < CONFIG.HEART_R * 3) &&
-             attempts < 40);
+             attempts < 50);
     el.heart.style.left = (heartX - 20) + 'px';
     el.heart.style.top = (heartY - 20) + 'px';
+}
+
+// ============================================================
+// PRELOADER — загружает все звуки и картинки до запуска
+// ============================================================
+async function startLoading() {
+    show('loading');
+    const audioUrls = CONFIG.PRELOAD_AUDIO || [];
+    const imageUrls = CONFIG.PRELOAD_IMAGES || [];
+    const total = audioUrls.length + imageUrls.length;
+    let loaded = 0;
+
+    function updateProgress() {
+        loaded++;
+        const pct = Math.round((loaded / Math.max(1, total)) * 100);
+        if (el.loadingFill) el.loadingFill.style.width = pct + '%';
+        if (el.loadingText) {
+            const texts = ['Загрузка...', 'Подготовка...', 'Скоро начнём...', 'Почти готово...'];
+            el.loadingText.textContent = pct < 30 ? texts[0] : pct < 60 ? texts[1] : pct < 90 ? texts[2] : texts[3];
+        }
+    }
+
+    // Preload audio
+    const audioPromises = audioUrls.map(url => new Promise(resolve => {
+        let done = false;
+        const finish = () => { if (done) return; done = true; updateProgress(); resolve(); };
+        const audio = new Audio();
+        audio.preload = 'auto';
+        audio.oncanplaythrough = finish;
+        audio.onerror = finish;
+        setTimeout(finish, 5000);
+        audio.src = url;
+        audio.load();
+    }));
+
+    // Preload images
+    const imagePromises = imageUrls.map(url => new Promise(resolve => {
+        let done = false;
+        const finish = () => { if (done) return; done = true; updateProgress(); resolve(); };
+        const img = new Image();
+        img.onload = finish;
+        img.onerror = finish;
+        setTimeout(finish, 5000);
+        img.src = url;
+    }));
+
+    // Also force-load the HTML audio elements
+    [ambientSound, laughSound, screamSound, meowSound].forEach(a => {
+        if (a) a.load();
+    });
+
+    await Promise.all([...audioPromises, ...imagePromises]);
+
+    // Small delay for UX
+    if (el.loadingFill) el.loadingFill.style.width = '100%';
+    if (el.loadingText) el.loadingText.textContent = 'Готово!';
+    await new Promise(r => setTimeout(r, 400));
+
+    showTutorial();
+}
+
+// ============================================================
+// CREEPY TEXT — кровавый текст между раундами
+// ============================================================
+function maybeShowCreepyText(round, realHappened, callback) {
+    const chance = CONFIG.CREEPY_TEXT_CHANCE_BASE + round * CONFIG.CREEPY_TEXT_CHANCE_GROWTH;
+    const minRound = CONFIG.CREEPY_TEXT_MIN_ROUND || 1;
+    if (round < minRound || Math.random() > chance) {
+        callback();
+        return;
+    }
+
+    const phase = realHappened ? 'post' : (round >= 7 ? 'late' : (round >= 3 ? 'mid' : 'early'));
+    const msgs = CONFIG.CREEPY_MESSAGES[phase];
+    let available = msgs.filter(m => !state.creepyUsed.has(m));
+    if (available.length === 0) {
+        state.creepyUsed.clear();
+        available = [...msgs];
+    }
+    const msg = available[Math.floor(Math.random() * available.length)];
+    state.creepyUsed.add(msg);
+
+    if (!el.creepyText) { callback(); return; }
+
+    el.creepyText.textContent = msg;
+    el.creepyText.className = 'creepy-text visible';
+
+    const holdTime = 1200 + Math.random() * 800;
+    setTimeout(() => {
+        el.creepyText.className = 'creepy-text fade-out';
+        setTimeout(() => {
+            el.creepyText.className = 'creepy-text';
+            setTimeout(callback, 200);
+        }, 400);
+    }, holdTime);
 }
 
 // ============================================================
 // SCREENS
 // ============================================================
 function show(name) {
-    ['warning','tutorial','game','results'].forEach(s =>
-        el[s].classList.toggle('active', s === name));
+    ['warning','loading','tutorial','game','results'].forEach(s =>
+        el[s]?.classList.toggle('active', s === name));
 }
 
 function showTutorial() { playLaugh(); playAmbient(); show('tutorial'); }
 
 function startGame() {
-    atmosphere.unlock(); // Resume AudioContext after user gesture
+    atmosphere.unlock();
     show('game');
     Object.assign(state, {
         phase:'wait', round:0, active:false,
@@ -137,11 +236,10 @@ function startGame() {
         realScreamer:null, postCalib:[],
         fakeHappened:false, realHappened:false,
         currentEvent:'normal', trajectory:[], maxRecoil:0,
-        screamerAt:0
+        screamerAt:0, creepyUsed: new Set()
     });
     clearTimeout(state.heartTimer);
 
-    // Atmosphere picks scenario & round numbers
     atmosphere.pickScenario();
     const rounds = atmosphere.getScreamerRounds();
     state.fakeScreamerRound = rounds.fakeRound;
@@ -155,7 +253,7 @@ function startGame() {
     el.heart.classList.remove('visible','fading');
     el.screamer.classList.remove('active');
     el.fakeScreamer.classList.remove('active');
-    updateHeartsUI();
+    if (el.creepyText) el.creepyText.className = 'creepy-text';
     el.instruction.textContent = 'Положи палец в круг';
     el.zone.className = 'hold-zone';
 
@@ -289,7 +387,6 @@ function enterZone(x, y) {
 function showHeart() {
     const C = CONFIG;
 
-    // Determine event type
     if (state.round === state.fakeScreamerRound && !state.fakeHappened) {
         state.currentEvent = 'fake';
     } else if (state.round === state.realScreamerRound && !state.realHappened) {
@@ -298,10 +395,8 @@ function showHeart() {
         state.currentEvent = 'normal';
     }
 
-    // Atmosphere round hook
     atmosphere.onRound(state.round, state.currentEvent === 'real', state.realHappened);
 
-    // Reset round
     state.heartCaughtThisRound = false;
     state.returnedThisRound = false;
     state.trajectory = [];
@@ -310,7 +405,7 @@ function showHeart() {
     state.startX = state.lastX;
     state.startY = state.lastY;
     state.moveAt = 0;
-    state.screamerAt = 0; // 🐛 FIX: обнуляем чтобы не тащить между раундами
+    state.screamerAt = 0;
 
     const isReal = state.currentEvent === 'real';
     const isFake = state.currentEvent === 'fake';
@@ -318,7 +413,7 @@ function showHeart() {
 
     el.zone.className = 'hold-zone waiting';
 
-    // Heart anomaly check
+    // Heart anomaly
     const anomaly = atmosphere.getHeartAnomaly();
     if (anomaly && !isReal && !isFake) {
         if (anomaly.css) {
@@ -338,8 +433,6 @@ function showHeart() {
         }
         el.screamer.classList.add('active');
         playScream();
-
-        // Atmosphere screamer effects (red flash, invert, shake, haptic)
         atmosphere.onScreamer();
 
         state.phase = 'screamerShock';
@@ -440,7 +533,6 @@ function returnedToZone() {
         Math.abs(catchTime - returnTime) / (catchTime + returnTime) : 0;
 
     state.heartsCaught++;
-    updateHeartsUI();
     el.zone.className = 'hold-zone active';
     el.instruction.textContent = '';
 
@@ -469,10 +561,13 @@ function returnedToZone() {
     setTimeout(() => {
         state.phase = 'wait';
         if (state.active) {
-            const d = CONFIG.PAUSE_MIN + Math.random() * (CONFIG.PAUSE_MAX - CONFIG.PAUSE_MIN);
-            setTimeout(() => {
-                if (state.phase === 'wait' && state.active) showHeart();
-            }, d);
+            // Кровавый текст между раундами
+            maybeShowCreepyText(state.round, state.realHappened, () => {
+                const d = CONFIG.PAUSE_MIN + Math.random() * (CONFIG.PAUSE_MAX - CONFIG.PAUSE_MIN);
+                setTimeout(() => {
+                    if (state.phase === 'wait' && state.active) showHeart();
+                }, d);
+            });
         }
     }, 100);
 }
@@ -554,7 +649,6 @@ function showResults() {
 }
 
 async function saveGame(score, scr, fake, avgPre, avgPost) {
-    // Anti-duplicate
     const now = Date.now();
     if (now - state.lastSaveTime < CONFIG.SAVE_COOLDOWN_MS) {
         console.log('Save skipped — cooldown');
@@ -585,6 +679,7 @@ async function saveGame(score, scr, fake, avgPre, avgPost) {
         scream_recoil_distance: Math.round(scr.recoilDistance || 0),
         scream_freeze_onset: Math.round(scr.freezeOnset || 0),
         scream_return_asymmetry: Math.round((scr.returnAsymmetry || 0) * 100) / 100,
+        scream_shock_duration: Math.round(scr.shockDuration || 0),
 
         post_start_delay: Math.round(avgPost.startDelay),
         post_catch_time: Math.round(avgPost.catchTime),
