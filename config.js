@@ -1,5 +1,5 @@
 // ============================================================
-// config.js v5 — + интро, тренировка
+// config.js v6 — + bg3, intro flash images
 // ============================================================
 
 const CONFIG = {
@@ -28,14 +28,28 @@ const CONFIG = {
     SCREAMER_EMOJIS: ['👻', '💀', '😱', '🎃', '👹'],
 
     // --- Training ---
-    TRAINING_ROUNDS: 3,       // сколько тренировочных раундов
-    TRAINING_TIMEOUT: 3000,   // таймаут сердца в тренировке (больше)
+    TRAINING_ROUNDS: 3,
+    TRAINING_TIMEOUT: 3500,
 
     // --- Intro ---
-    INTRO_BLACK_MS: 1500,     // чёрный экран
-    INTRO_TEXT_MS: 2200,      // "чёрная роза" текст
-    INTRO_FLASH_MS: 1200,     // быстрые смены bg
-    INTRO_FADE_MS: 800,       // fade out
+    INTRO_BLACK_MS: 1500,
+    INTRO_TEXT_FADE_MS: 800,
+    INTRO_TEXT_HOLD_MS: 1500,
+    INTRO_SCATTER_MS: 900,
+    INTRO_FLASH_MS: 1800,
+    INTRO_PAUSE_MS: 600,
+    INTRO_FLASH_IMAGES: [
+        'assets/images/background.jpg',
+        'assets/images/bg2.jpg',
+        'assets/images/bg3.jpg',
+        'assets/images/bg2.jpg',
+        'assets/images/screamer.jpg',
+        'assets/images/bg3.jpg',
+        'assets/images/background.jpg',
+        'assets/images/bg2.jpg',
+        'assets/images/bg3.jpg',
+        'assets/images/screamer.jpg',
+    ],
 
     // --- Creepy text ---
     CREEPY_MESSAGES: {
@@ -64,7 +78,8 @@ const CONFIG = {
     PRELOAD_IMAGES: [
         'assets/images/background.jpg',
         'assets/images/bg2.jpg',
-        'assets/images/screamer.png',
+        'assets/images/bg3.jpg',
+        'assets/images/screamer.jpg',
         'assets/images/kitty.png',
     ],
 

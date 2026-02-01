@@ -45,20 +45,23 @@
     <!-- Intro — "Чёрная роза" -->
     <div id="intro" class="screen">
         <div class="intro-bg" id="introBg"></div>
-        <div class="intro-text" id="introText">чёрная роза</div>
+        <div class="intro-text" id="introText"></div>
     </div>
 
-    <!-- Tutorial (правила) -->
+    <!-- Tutorial (два выбора) -->
     <div id="tutorial" class="screen">
         <div class="content-card">
             <h2>Как играть</h2>
             <div class="tutorial-steps">
                 <div class="step"><div class="step-icon">👆</div><div class="step-text">Положи <strong>палец в круг</strong> внизу экрана</div></div>
-                <div class="step"><div class="step-icon">❤️</div><div class="step-text">Сердечко появится сверху — <strong>быстро лови!</strong></div></div>
+                <div class="step"><div class="step-icon">❤️</div><div class="step-text">Сердечко появится — <strong>быстро лови!</strong></div></div>
                 <div class="step"><div class="step-icon">↩️</div><div class="step-text">Поймал — <strong>вернись в круг</strong></div></div>
             </div>
             <div class="rule">⚡ Не отрывай палец от экрана!</div>
-            <button class="btn" onclick="startTraining()">Тренировка</button>
+            <div class="tutorial-buttons">
+                <button class="btn btn-train" onclick="startTraining()">Тренировка</button>
+                <button class="btn btn-play" onclick="skipToGame()">Играть</button>
+            </div>
         </div>
     </div>
 
@@ -66,7 +69,7 @@
     <div id="game" class="screen">
         <div class="instruction" id="instruction">Положи палец в круг</div>
 
-        <!-- Training hint overlay -->
+        <!-- Training hint -->
         <div class="train-hint" id="trainHint"></div>
 
         <!-- Creepy text -->
@@ -100,7 +103,7 @@
             <h2>Отлично!</h2>
             <p>Теперь ты знаешь как играть.</p>
             <p style="font-size:13px;color:#999;margin-top:10px;">Игра начнётся по-настоящему</p>
-            <button class="btn" onclick="startGameFromTraining()">Начать</button>
+            <button class="btn btn-play" onclick="startGameFromTraining()">Играть</button>
         </div>
     </div>
 

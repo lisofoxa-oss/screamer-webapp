@@ -1,8 +1,12 @@
 // ============================================================
-// game.js v5 — Интро + тренировка + прелоадер
+// game.js v6 — Фикс тренировки, scatter-интро, fullscreen
 //
-// Поток: Warning → Loading → Intro (чёрная роза) → Tutorial →
-//        Training (2-3 раунда, не записываем) → Game → Results
+// Фиксы:
+// - onTrainingCatch/Return теперь обрабатывают step 4
+// - unbindEvents правильно снимает listener'ы
+// - Fullscreen при первом касании
+// - Интро: "чёрная роза" разлетается буквами
+// - Тренировочные подсказки позиционируются правильно
 // ============================================================
 
 // === Telegram ===
@@ -10,6 +14,19 @@ const tg = window.Telegram?.WebApp;
 if (tg) { tg.expand(); tg.ready(); }
 const urlParams = new URLSearchParams(window.location.search);
 const userId = urlParams.get('user_id') || tg?.initDataUnsafe?.user?.id;
+
+// === Fullscreen ===
+function requestFullscreen() {
+    const tg = window.Telegram?.WebApp;
+    if (tg?.isVersionAtLeast?.('8.0') && tg.requestFullscreen) {
+        try { tg.requestFullscreen(); } catch(e) {}
+    }
+    const el = document.documentElement;
+    try {
+        if (el.requestFullscreen) el.requestFullscreen().catch(()=>{});
+        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    } catch(e) {}
+}
 
 // === Audio ===
 let soundOn = true;
@@ -82,11 +99,7 @@ const state = {
     preCalib: [], fakeScreamer: null, midCalib: [], realScreamer: null, postCalib: [],
     heartTimer: null, _currentRound: null,
     lastSaveTime: 0, creepyUsed: new Set(),
-
-    // Training
-    isTraining: false,
-    trainingStep: 0, // 0=not started, 1=place finger, 2=catch heart, 3=return, 4=free practice
-    trainingRound: 0,
+    isTraining: false, trainingStep: 0, trainingRound: 0,
 };
 
 // === Helpers ===
@@ -126,10 +139,20 @@ function placeHeart(minDist) {
 }
 
 // ============================================================
+// SCREENS
+// ============================================================
+function show(name) {
+    ['warning','loading','intro','tutorial','game','trainDone','results'].forEach(s =>
+        el[s]?.classList.toggle('active', s === name));
+}
+
+// ============================================================
 // PRELOADER
 // ============================================================
 async function startLoading() {
+    requestFullscreen();
     show('loading');
+
     const audioUrls = CONFIG.PRELOAD_AUDIO || [];
     const imageUrls = CONFIG.PRELOAD_IMAGES || [];
     const total = audioUrls.length + imageUrls.length;
@@ -168,7 +191,6 @@ async function startLoading() {
     }));
 
     [ambientSound, laughSound, screamSound, meowSound].forEach(a => { if (a) a.load(); });
-
     await Promise.all([...audioPromises, ...imagePromises]);
 
     if (el.loadingFill) el.loadingFill.style.width = '100%';
@@ -179,7 +201,7 @@ async function startLoading() {
 }
 
 // ============================================================
-// INTRO — "Чёрная роза"
+// INTRO — "Чёрная роза" с разлётом букв
 // ============================================================
 function playIntro() {
     show('intro');
@@ -189,45 +211,91 @@ function playIntro() {
     const textEl = el.introText;
     const bgFlash = el.introBg;
 
-    // Фаза 1: чёрный экран
-    if (textEl) textEl.style.opacity = '0';
+    // Создаём отдельные span'ы для каждой буквы
+    if (textEl) {
+        textEl.innerHTML = '';
+        textEl.style.opacity = '0';
+        const text = 'чёрная роза';
+        for (const ch of text) {
+            const span = document.createElement('span');
+            span.className = 'intro-letter';
+            span.textContent = ch === ' ' ? '\u00A0\u00A0' : ch;
+            textEl.appendChild(span);
+        }
+    }
     if (bgFlash) bgFlash.style.opacity = '0';
 
-    // Фаза 2: текст "чёрная роза" появляется
+    let t = 0;
+
+    // Фаза 1: чёрный экран
+    t += C.INTRO_BLACK_MS;
+
+    // Фаза 2: текст появляется
     setTimeout(() => {
-        if (textEl) {
-            textEl.textContent = 'чёрная роза';
-            textEl.style.opacity = '1';
+        if (textEl) textEl.style.opacity = '1';
+    }, t);
+    t += C.INTRO_TEXT_FADE_MS + C.INTRO_TEXT_HOLD_MS;
+
+    // Фаза 3: буквы разлетаются
+    setTimeout(() => {
+        scatterIntroText();
+    }, t);
+    t += C.INTRO_SCATTER_MS;
+
+    // Фаза 4: быстрые мерцающие вспышки bg2/bg3/screamer
+    setTimeout(() => {
+        doIntroFlashes();
+    }, t);
+    t += C.INTRO_FLASH_MS;
+
+    // Фаза 5: переход к tutorial
+    t += C.INTRO_PAUSE_MS;
+    setTimeout(() => {
+        show('tutorial');
+    }, t);
+}
+
+function scatterIntroText() {
+    const letters = document.querySelectorAll('.intro-letter');
+    letters.forEach((l, i) => {
+        const tx = (Math.random() - 0.5) * 500;
+        const ty = (Math.random() - 0.5) * 350;
+        const rot = (Math.random() - 0.5) * 360;
+        const scale = 0.2 + Math.random() * 0.5;
+        const dur = 0.5 + Math.random() * 0.4;
+        const delay = i * 0.03;
+        l.style.transition = `transform ${dur}s ease-out ${delay}s, opacity ${dur * 0.8}s ease-out ${delay}s`;
+        l.style.transform = `translate(${tx}px, ${ty}px) rotate(${rot}deg) scale(${scale})`;
+        l.style.opacity = '0';
+    });
+}
+
+function doIntroFlashes() {
+    const bgFlash = el.introBg;
+    if (!bgFlash) return;
+
+    const images = CONFIG.INTRO_FLASH_IMAGES || [
+        'assets/images/bg2.jpg', 'assets/images/bg3.jpg'
+    ];
+    const totalMs = CONFIG.INTRO_FLASH_MS || 1800;
+    const interval = totalMs / images.length;
+    let i = 0;
+
+    const flash = () => {
+        if (i >= images.length) {
+            bgFlash.style.opacity = '0';
+            return;
         }
-    }, C.INTRO_BLACK_MS);
+        bgFlash.style.backgroundImage = `url('${images[i]}')`;
+        bgFlash.style.opacity = '1';
 
-    // Фаза 3: текст исчезает, быстрые вспышки bg
-    setTimeout(() => {
-        if (textEl) textEl.style.opacity = '0';
-
-        // Быстрые смены bg
-        if (bgFlash) {
-            let flashes = 0;
-            const maxFlashes = 8;
-            const flashInterval = setInterval(() => {
-                flashes++;
-                bgFlash.style.opacity = flashes % 2 === 0 ? '0' : '1';
-                bgFlash.style.backgroundImage = flashes % 2 === 0
-                    ? "url('assets/images/background.jpg')"
-                    : "url('assets/images/bg2.jpg')";
-                if (flashes >= maxFlashes) {
-                    clearInterval(flashInterval);
-                    bgFlash.style.opacity = '0';
-                }
-            }, C.INTRO_FLASH_MS / maxFlashes);
-        }
-    }, C.INTRO_BLACK_MS + C.INTRO_TEXT_MS);
-
-    // Фаза 4: переход к tutorial
-    const totalTime = C.INTRO_BLACK_MS + C.INTRO_TEXT_MS + C.INTRO_FLASH_MS + C.INTRO_FADE_MS;
-    setTimeout(() => {
-        showTutorial();
-    }, totalTime);
+        setTimeout(() => {
+            bgFlash.style.opacity = '0';
+            i++;
+            setTimeout(flash, 30 + Math.random() * 40);
+        }, interval * 0.6);
+    };
+    flash();
 }
 
 // ============================================================
@@ -261,20 +329,11 @@ function maybeShowCreepyText(round, realHappened, callback) {
 }
 
 // ============================================================
-// SCREENS
-// ============================================================
-function show(name) {
-    ['warning','loading','intro','tutorial','game','trainDone','results'].forEach(s =>
-        el[s]?.classList.toggle('active', s === name));
-}
-
-function showTutorial() { show('tutorial'); }
-
-// ============================================================
-// TRAINING — пошаговое обучение
+// TRAINING — пошаговое обучение (ИСПРАВЛЕНО)
 // ============================================================
 function startTraining() {
     atmosphere.unlock();
+    requestFullscreen();
     show('game');
 
     state.isTraining = true;
@@ -294,18 +353,32 @@ function startTraining() {
     el.fakeScreamer.classList.remove('active');
     if (el.creepyText) el.creepyText.className = 'creepy-text';
 
-    // Шаг 1: приложи палец
-    showTrainHint('Приложи палец сюда ↓');
-    el.zone.className = 'hold-zone train-pulse';
     el.instruction.textContent = '';
+    showTrainHint('Приложи палец сюда ↓', 'above-zone');
+    el.zone.className = 'hold-zone train-pulse';
 
     bindEvents();
 }
 
-function showTrainHint(text) {
-    if (el.trainHint) {
-        el.trainHint.textContent = text;
-        el.trainHint.classList.add('visible');
+function showTrainHint(text, position) {
+    if (!el.trainHint) return;
+    el.trainHint.textContent = text;
+    el.trainHint.classList.add('visible');
+    // Сброс позиции
+    el.trainHint.style.top = '';
+    el.trainHint.style.bottom = '';
+    switch (position) {
+        case 'above-zone':
+            el.trainHint.style.bottom = '38%';
+            break;
+        case 'above-heart':
+            el.trainHint.style.top = '5%';
+            break;
+        case 'middle':
+            el.trainHint.style.top = '38%';
+            break;
+        default:
+            el.trainHint.style.bottom = '38%';
     }
 }
 
@@ -314,85 +387,71 @@ function hideTrainHint() {
 }
 
 function onTrainingZoneEnter() {
-    if (state.trainingStep === 1) {
-        // Палец в зоне — показываем сердце
-        state.trainingStep = 2;
-        el.zone.className = 'hold-zone active';
-        showTrainHint('Проведи палец к сердечку ↑');
+    if (state.trainingStep !== 1) return;
+    // Палец в зоне — показываем сердце
+    state.trainingStep = 2;
+    el.zone.className = 'hold-zone active';
 
-        setTimeout(() => {
-            placeHeart(CONFIG.MIN_HEART_DIST);
-            el.heart.classList.add('visible');
-            state.phase = 'toHeart';
-            state.heartAt = Date.now();
-            // Длинный таймаут для тренировки
-            clearTimeout(state.heartTimer);
-            state.heartTimer = setTimeout(() => {
-                if (state.phase === 'toHeart' && state.isTraining) {
-                    el.heart.classList.add('fading');
-                    setTimeout(() => trainMissHeart(), 300);
-                }
-            }, CONFIG.TRAINING_TIMEOUT);
-        }, 500);
-    }
+    setTimeout(() => {
+        if (!state.isTraining) return;
+        placeHeart(CONFIG.MIN_HEART_DIST);
+        el.heart.classList.add('visible');
+        state.phase = 'toHeart';
+        state.heartAt = Date.now();
+        showTrainHint('Проведи палец к сердечку ↑', 'above-heart');
+
+        clearTimeout(state.heartTimer);
+        state.heartTimer = setTimeout(() => {
+            if (state.phase === 'toHeart' && state.isTraining) {
+                el.heart.classList.add('fading');
+                setTimeout(() => trainMissHeart(), 300);
+            }
+        }, CONFIG.TRAINING_TIMEOUT);
+    }, 500);
 }
 
 function onTrainingCatch() {
+    // Ловим и на шаге 2 (guided) и на шаге 4 (free practice)
+    if (state.trainingStep !== 2 && state.trainingStep !== 4) return;
+
+    clearTimeout(state.heartTimer);
+    el.heart.classList.remove('visible','fading');
+    state.phase = 'toZone';
+    state.catchX = state.lastX;
+    state.catchY = state.lastY;
+    state.maxRecoil = 0;
+
     if (state.trainingStep === 2) {
         state.trainingStep = 3;
-        clearTimeout(state.heartTimer);
-        el.heart.classList.remove('visible','fading');
-        showTrainHint('Верни палец в круг ↓');
-        state.phase = 'toZone';
-        state.catchX = state.lastX;
-        state.catchY = state.lastY;
-        state.maxRecoil = 0;
+        showTrainHint('Верни палец в круг ↓', 'middle');
     }
+    // step 4: подсказки не нужны
 }
 
 function onTrainingReturn() {
+    if (state.trainingStep !== 3 && state.trainingStep !== 4) return;
+
+    state.trainingRound++;
+    state.heartsCaught++;
+    el.zone.className = 'hold-zone active';
+
     if (state.trainingStep === 3) {
-        state.trainingRound++;
-        state.heartsCaught++;
-        el.zone.className = 'hold-zone active';
-
-        if (state.trainingRound === 1) {
-            // После первого раунда — подсказка
-            showTrainHint('Не отрывай палец от экрана!');
-            setTimeout(() => {
-                state.trainingStep = 4; // свободная тренировка
-                hideTrainHint();
-                startTrainFreeRound();
-            }, 1800);
-        } else if (state.trainingRound >= CONFIG.TRAINING_ROUNDS) {
-            // Тренировка окончена
-            hideTrainHint();
-            state.isTraining = false;
-            state.phase = 'wait';
-            state.active = false;
-            el.zone.className = 'hold-zone';
-            unbindEvents();
-            showTrainComplete();
-        } else {
-            // Следующий свободный раунд
-            hideTrainHint();
+        // После первого guided раунда
+        showTrainHint('Не отрывай палец от экрана!', 'middle');
+        setTimeout(() => {
+            if (!state.isTraining) return;
             state.trainingStep = 4;
-            startTrainFreeRound();
-        }
-    } else if (state.trainingStep === 4) {
-        // Свободная тренировка — следующий раунд
-        state.trainingRound++;
-        state.heartsCaught++;
-        el.zone.className = 'hold-zone active';
-
-        if (state.trainingRound >= CONFIG.TRAINING_ROUNDS) {
             hideTrainHint();
-            state.isTraining = false;
-            state.phase = 'wait';
-            state.active = false;
-            el.zone.className = 'hold-zone';
-            unbindEvents();
-            showTrainComplete();
+            if (state.trainingRound >= CONFIG.TRAINING_ROUNDS) {
+                finishTraining();
+            } else {
+                startTrainFreeRound();
+            }
+        }, 1800);
+    } else {
+        // Free practice (step 4)
+        if (state.trainingRound >= CONFIG.TRAINING_ROUNDS) {
+            finishTraining();
         } else {
             startTrainFreeRound();
         }
@@ -401,9 +460,18 @@ function onTrainingReturn() {
 
 function startTrainFreeRound() {
     state.phase = 'wait';
-    const delay = 800 + Math.random() * 600;
+    el.zone.className = 'hold-zone active';
+    const delay = 600 + Math.random() * 500;
+
     setTimeout(() => {
-        if (!state.isTraining || !state.active) return;
+        if (!state.isTraining) return;
+        // Если палец не на экране — ждём возвращения
+        if (!state.active) {
+            state.phase = 'wait';
+            el.zone.className = 'hold-zone train-pulse';
+            // process() подхватит когда палец вернётся
+            return;
+        }
         placeHeart(CONFIG.MIN_HEART_DIST);
         el.heart.classList.add('visible');
         state.phase = 'toHeart';
@@ -424,26 +492,42 @@ function trainMissHeart() {
     if (!state.isTraining) return;
     state.phase = 'wait';
     el.heart.classList.remove('visible','fading');
-    el.zone.className = 'hold-zone';
+    el.zone.className = 'hold-zone train-pulse';
     el.instruction.textContent = 'Не успел! Попробуй ещё раз';
-    // Сбрасываем шаг на 1 если в guided, иначе просто повторяем
+    setTimeout(() => { el.instruction.textContent = ''; }, 1500);
+
     if (state.trainingStep < 4) {
         state.trainingStep = 1;
-        showTrainHint('Приложи палец сюда ↓');
-        el.zone.className = 'hold-zone train-pulse';
+        showTrainHint('Приложи палец сюда ↓', 'above-zone');
     } else {
+        // Free practice — авто-retry если палец на экране
         setTimeout(() => {
-            if (state.isTraining && state.active) startTrainFreeRound();
-        }, 500);
+            if (state.isTraining && state.active && inZone(state.lastX, state.lastY)) {
+                startTrainFreeRound();
+            }
+        }, 800);
     }
 }
 
-function showTrainComplete() {
-    // Показываем экран "готов к игре"
+function finishTraining() {
+    state.isTraining = false;
+    state.phase = 'wait';
+    state.active = false;
+    clearTimeout(state.heartTimer);
+    el.heart.classList.remove('visible','fading');
+    el.zone.className = 'hold-zone';
+    hideTrainHint();
+    unbindEvents();
     show('trainDone');
 }
 
 function startGameFromTraining() {
+    startGame();
+}
+
+function skipToGame() {
+    requestFullscreen();
+    atmosphere.unlock();
     startGame();
 }
 
@@ -452,7 +536,9 @@ function startGameFromTraining() {
 // ============================================================
 function startGame() {
     atmosphere.unlock();
+    requestFullscreen();
     show('game');
+
     Object.assign(state, {
         phase:'wait', round:0, active:false, isTraining: false,
         heartCaughtThisRound:false, returnedThisRound:false,
@@ -462,7 +548,7 @@ function startGame() {
         fakeHappened:false, realHappened:false,
         currentEvent:'normal', trajectory:[], maxRecoil:0,
         screamerAt:0, creepyUsed: new Set(),
-        trainingStep: 0
+        trainingStep: 0, trainingRound: 0
     });
     clearTimeout(state.heartTimer);
 
@@ -491,29 +577,6 @@ function startGame() {
 // ============================================================
 // EVENTS
 // ============================================================
-function bindEvents() {
-    const evts = [
-        ['touchstart', onTouchStart], ['touchmove', onTouchMove], ['touchend', onTouchEnd],
-        ['mousedown', onMouseDown], ['mousemove', onMouseMove], ['mouseup', onMouseUp]
-    ];
-    evts.forEach(([e,fn]) => document.removeEventListener(e, fn));
-    document.addEventListener('touchstart', onTouchStart, {passive:false});
-    document.addEventListener('touchmove', onTouchMove, {passive:false});
-    document.addEventListener('touchend', onTouchEnd, {passive:false});
-    document.addEventListener('mousedown', onMouseDown);
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-}
-
-function unbindEvents() {
-    ['touchstart','touchmove','touchend','mousedown','mousemove','mouseup'].forEach(e => {
-        document.removeEventListener(e, {touchstart:onTouchStart, touchmove:onTouchMove,
-            touchend:onTouchEnd, mousedown:onMouseDown, mousemove:onMouseMove, mouseup:onMouseUp}[e]);
-    });
-}
-
-function touchInfo(t) { return { radiusX: t.radiusX||0, radiusY: t.radiusY||0, force: t.force||0 }; }
-
 function onTouchStart(e) {
     e.preventDefault();
     const t = e.touches[0];
@@ -548,19 +611,42 @@ function onMouseMove(e) {
 }
 function onMouseUp(e) { if (state.isMouse) handleRelease(); }
 
+function touchInfo(t) { return { radiusX: t.radiusX||0, radiusY: t.radiusY||0, force: t.force||0 }; }
+
+function bindEvents() {
+    unbindEvents();
+    document.addEventListener('touchstart', onTouchStart, {passive:false});
+    document.addEventListener('touchmove', onTouchMove, {passive:false});
+    document.addEventListener('touchend', onTouchEnd, {passive:false});
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+}
+
+function unbindEvents() {
+    document.removeEventListener('touchstart', onTouchStart);
+    document.removeEventListener('touchmove', onTouchMove);
+    document.removeEventListener('touchend', onTouchEnd);
+    document.removeEventListener('mousedown', onMouseDown);
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('mouseup', onMouseUp);
+}
+
 function handleRelease() {
     if (state.isTraining) {
-        // В тренировке: сброс
         if (['toHeart','toZone'].includes(state.phase)) {
             state.phase = 'wait';
             el.heart.classList.remove('visible','fading');
             clearTimeout(state.heartTimer);
+            el.zone.className = 'hold-zone train-pulse';
+            el.instruction.textContent = 'Палец оторвался! Снова в круг';
+            setTimeout(() => { if (state.isTraining) el.instruction.textContent = ''; }, 1500);
+            // Сброс guided шагов
             if (state.trainingStep < 4) {
                 state.trainingStep = 1;
-                showTrainHint('Приложи палец сюда ↓');
-                el.zone.className = 'hold-zone train-pulse';
+                showTrainHint('Приложи палец сюда ↓', 'above-zone');
             }
-            el.instruction.textContent = 'Палец оторвался! Попробуй ещё';
+            // step 4: process() подхватит при возврате пальца в зону
         }
         state.active = false;
         el.pointer.classList.remove('active');
@@ -593,7 +679,13 @@ function process(x, y, prevX, prevY, ti) {
     if (state.isTraining) {
         if (state.phase === 'wait' && inZone(x, y)) {
             state.active = true;
-            onTrainingZoneEnter();
+            if (state.trainingStep === 1) {
+                onTrainingZoneEnter();
+            } else if (state.trainingStep === 4) {
+                // Палец вернулся в зону в свободной практике
+                el.zone.className = 'hold-zone active';
+                startTrainFreeRound();
+            }
         }
         if (state.phase === 'toHeart' && onHeart(x, y)) {
             onTrainingCatch();
