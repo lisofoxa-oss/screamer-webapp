@@ -59,7 +59,7 @@ const CONFIG = {
     PRELOAD_IMAGES: [
         'assets/images/background.jpg',
         'assets/images/bg2.jpg',
-        'assets/images/screamer.jpg',
+        'assets/images/screamer.png',
         'assets/images/kitty.png',
     ],
 
