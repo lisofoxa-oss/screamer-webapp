@@ -140,10 +140,15 @@ function startGame() {
     });
     clearTimeout(state.heartTimer);
 
-    const C = CONFIG;
-    state.fakeScreamerRound = C.FAKE_ROUND_MIN + Math.floor(Math.random() * C.FAKE_ROUND_SPREAD);
-    state.realScreamerRound = state.fakeScreamerRound + C.REAL_AFTER_FAKE_MIN + Math.floor(Math.random() * C.REAL_AFTER_FAKE_SPREAD);
-    console.log(`Rounds — Fake: ${state.fakeScreamerRound}, Real: ${state.realScreamerRound}`);
+    // Atmosphere picks scenario & round numbers
+    atmosphere.pickScenario();
+    const rounds = atmosphere.getScreamerRounds();
+    state.fakeScreamerRound = rounds.fakeRound;
+    state.realScreamerRound = rounds.realRound;
+    state.scenarioKey = rounds.scenarioKey;
+    console.log(`🎭 Scenario ${rounds.scenarioKey} — Fake: ${state.fakeScreamerRound}, Real: ${state.realScreamerRound}`);
+
+    atmosphere.start();
 
     el.pointer.classList.remove('active');
     el.heart.classList.remove('visible','fading');
@@ -292,6 +297,9 @@ function showHeart() {
         state.currentEvent = 'normal';
     }
 
+    // Atmosphere round hook
+    atmosphere.onRound(state.round, state.currentEvent === 'real', state.realHappened);
+
     // Reset round
     state.heartCaughtThisRound = false;
     state.returnedThisRound = false;
@@ -309,6 +317,19 @@ function showHeart() {
 
     el.zone.className = 'hold-zone waiting';
 
+    // Heart anomaly check
+    const anomaly = atmosphere.getHeartAnomaly();
+    if (anomaly && !isReal && !isFake) {
+        if (anomaly.css) {
+            el.heart.style.cssText += anomaly.css;
+            if (anomaly.duration > 0) {
+                setTimeout(() => { el.heart.style.filter = ''; el.heart.style.opacity = ''; }, anomaly.duration);
+            }
+        }
+    } else {
+        el.heart.style.filter = '';
+    }
+
     if (isReal) {
         state.screamerAt = Date.now();
         if (el.screamerEmoji) {
@@ -316,7 +337,9 @@ function showHeart() {
         }
         el.screamer.classList.add('active');
         playScream();
-        if (navigator.vibrate) navigator.vibrate([200,50,200,50,300]);
+
+        // Atmosphere screamer effects (red flash, invert, shake, haptic)
+        atmosphere.onScreamer();
 
         state.phase = 'screamerShock';
         state.heartAt = Date.now();
@@ -498,6 +521,7 @@ function fail() {
 // ============================================================
 function showResults() {
     stopAmbient();
+    atmosphere.stop();
     ['touchstart','touchmove','touchend','mousedown','mousemove','mouseup'].forEach(e => {
         document.removeEventListener(e, {touchstart:onTouchStart, touchmove:onTouchMove,
             touchend:onTouchEnd, mousedown:onMouseDown, mousemove:onMouseMove, mouseup:onMouseUp}[e]);
@@ -574,6 +598,7 @@ async function saveGame(score, scr, fake, avgPre, avgPost) {
         device_info: navigator.userAgent,
         telegram_id: userId,
         username: tg?.initDataUnsafe?.user?.username || 'unknown',
+        scenario: state.scenarioKey || 'unknown',
 
         raw_pre_calib: state.preCalib,
         raw_mid_calib: state.midCalib,
