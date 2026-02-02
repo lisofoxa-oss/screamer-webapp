@@ -68,6 +68,11 @@
     <div id="game" class="screen">
         <div class="instruction" id="instruction">Положи палец в круг</div>
 
+        <!-- Glitchy clock -->
+        <div class="glitch-clock" id="glitchClock">
+            <span class="clock-hours">03</span>:<span class="clock-minutes">33</span>:<span class="clock-seconds">33</span>
+        </div>
+
         <!-- Training hint -->
         <div class="train-hint" id="trainHint"></div>
 
@@ -132,6 +137,7 @@
     <audio id="laughSound" preload="auto"><source src="assets/sounds/laugh.mp3" type="audio/mpeg"></audio>
     <audio id="screamSound" preload="auto"><source src="assets/sounds/scream.mp3" type="audio/mpeg"></audio>
     <audio id="meowSound" preload="auto"><source src="assets/sounds/meow.mp3" type="audio/mpeg"></audio>
+    <audio id="breathSound" loop preload="auto"><source src="assets/sounds/breath.mp3" type="audio/mpeg"></audio>
 
     <script src="config.js"></script>
     <script src="atmosphere.js"></script>

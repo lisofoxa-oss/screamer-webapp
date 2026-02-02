@@ -35,16 +35,21 @@ const ambientSound = document.getElementById('ambientSound');
 const laughSound = document.getElementById('laughSound');
 const screamSound = document.getElementById('screamSound');
 const meowSound = document.getElementById('meowSound');
+const breathSound = document.getElementById('breathSound');
 
 if (ambientSound) ambientSound.volume = 0.3;
 if (laughSound) laughSound.volume = 0.6;
 if (screamSound) screamSound.volume = 0.8;
 if (meowSound) meowSound.volume = 0.7;
+if (breathSound) breathSound.volume = 0;
 
 document.getElementById('soundBtn').onclick = () => {
     soundOn = !soundOn;
     document.getElementById('soundBtn').textContent = soundOn ? '🔊' : '🔇';
-    if (!soundOn && ambientSound) ambientSound.pause();
+    if (!soundOn) {
+        if (ambientSound) ambientSound.pause();
+        if (breathSound) breathSound.pause();
+    }
 };
 
 function playAmbient() { if (soundOn && ambientSound) ambientSound.play().catch(()=>{}); }
@@ -65,6 +70,126 @@ function playScream() {
             gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
             osc.start(); osc.stop(ctx.currentTime + 0.3);
         } catch(e) {}
+    }
+}
+
+// === Breathing Sound Control ===
+function startBreathing() {
+    if (!soundOn || !breathSound || !CONFIG.BREATH_ENABLED) return;
+    breathSound.volume = CONFIG.BREATH_VOLUME_START;
+    breathSound.playbackRate = CONFIG.BREATH_RATE_START;
+    breathSound.play().catch(()=>{});
+}
+
+function updateBreathing(round, realRound) {
+    if (!breathSound || !CONFIG.BREATH_ENABLED) return;
+    if (round < CONFIG.BREATH_START_ROUND) return;
+    
+    // Прогресс от начала до скримера
+    const startR = CONFIG.BREATH_START_ROUND;
+    const progress = Math.min(1, (round - startR) / (realRound - startR));
+    
+    // Плавное нарастание громкости и скорости
+    const vol = CONFIG.BREATH_VOLUME_START + (CONFIG.BREATH_VOLUME_MAX - CONFIG.BREATH_VOLUME_START) * progress;
+    const rate = CONFIG.BREATH_RATE_START + (CONFIG.BREATH_RATE_MAX - CONFIG.BREATH_RATE_START) * progress;
+    
+    breathSound.volume = Math.min(vol, CONFIG.BREATH_VOLUME_MAX);
+    breathSound.playbackRate = Math.min(rate, CONFIG.BREATH_RATE_MAX);
+}
+
+function stopBreathing() {
+    if (breathSound) {
+        breathSound.pause();
+        breathSound.currentTime = 0;
+        breathSound.volume = 0;
+        breathSound.playbackRate = 1.0;
+    }
+}
+
+// === Glitch Clock Control ===
+const clockEl = document.getElementById('glitchClock');
+let clockInterval = null;
+
+function showClock() {
+    if (!clockEl || !CONFIG.CLOCK_ENABLED) return;
+    clockEl.classList.add('visible');
+    updateClockDisplay();
+    clockInterval = setInterval(updateClockDisplay, 1000);
+}
+
+function hideClock() {
+    if (clockEl) clockEl.classList.remove('visible', 'intense');
+    if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
+}
+
+function updateClockDisplay() {
+    if (!clockEl) return;
+    const hours = clockEl.querySelector('.clock-hours');
+    const mins = clockEl.querySelector('.clock-minutes');
+    const secs = clockEl.querySelector('.clock-seconds');
+    if (!hours || !mins || !secs) return;
+    
+    // 30% шанс показать странное время
+    if (Math.random() < 0.3) {
+        const creepy = CONFIG.CLOCK_CREEPY_TIMES[Math.floor(Math.random() * CONFIG.CLOCK_CREEPY_TIMES.length)];
+        const [h, m] = creepy.split(':');
+        hours.textContent = h;
+        mins.textContent = m;
+        secs.textContent = String(Math.floor(Math.random() * 60)).padStart(2, '0');
+    } else {
+        // Нормальное время, но секунды иногда скачут
+        const now = new Date();
+        hours.textContent = String(now.getHours()).padStart(2, '0');
+        mins.textContent = String(now.getMinutes()).padStart(2, '0');
+        
+        // Секунды иногда идут назад или скачут
+        let sec = now.getSeconds();
+        if (Math.random() < 0.2) sec = (sec + Math.floor(Math.random() * 10) - 5 + 60) % 60;
+        secs.textContent = String(sec).padStart(2, '0');
+    }
+}
+
+function glitchClock() {
+    if (!clockEl || !CONFIG.CLOCK_ENABLED) return;
+    if (Math.random() > CONFIG.CLOCK_GLITCH_CHANCE) return;
+    
+    clockEl.classList.add('glitching');
+    setTimeout(() => clockEl.classList.remove('glitching'), 150);
+    
+    // Иногда показываем "глюк" в цифрах
+    const secs = clockEl.querySelector('.clock-seconds');
+    if (secs && Math.random() < 0.4) {
+        const orig = secs.textContent;
+        secs.textContent = '??';
+        setTimeout(() => { secs.textContent = orig; }, 100);
+    }
+}
+
+function intensifyClock() {
+    if (clockEl) clockEl.classList.add('intense');
+}
+
+// === Vibration Escalation ===
+function vibrateForRound(round, realRound) {
+    if (!CONFIG.VIBRATE_ENABLED || !navigator.vibrate) return;
+    if (round < CONFIG.VIBRATE_START_ROUND) return;
+    
+    const progress = (round - CONFIG.VIBRATE_START_ROUND) / (realRound - CONFIG.VIBRATE_START_ROUND);
+    
+    // Выбираем паттерн по прогрессу
+    let pattern;
+    if (progress < 0.4) {
+        pattern = CONFIG.VIBRATE_PATTERN_LIGHT;
+    } else if (progress < 0.75) {
+        pattern = CONFIG.VIBRATE_PATTERN_MEDIUM;
+    } else {
+        pattern = CONFIG.VIBRATE_PATTERN_HEAVY;
+    }
+    
+    // Случайный шанс вибрации (чаще ближе к скримеру)
+    const chance = 0.2 + progress * 0.5;  // от 20% до 70%
+    if (Math.random() < chance) {
+        navigator.vibrate(pattern);
     }
 }
 
@@ -539,6 +664,10 @@ function startGame() {
     atmosphere.unlock();
     requestFullscreen();
     show('game');
+    
+    // Сброс атмосферных эффектов
+    stopBreathing();
+    hideClock();
 
     Object.assign(state, {
         phase:'wait', round:0, active:false, isTraining: false,
@@ -740,7 +869,14 @@ function enterZone(x, y) {
     el.zone.className = 'hold-zone active';
     el.instruction.textContent = '';
 
-    const delay = CONFIG.PAUSE_MIN + Math.random() * (CONFIG.PAUSE_MAX - CONFIG.PAUSE_MIN);
+    // Базовая задержка
+    let delay = CONFIG.PAUSE_MIN + Math.random() * (CONFIG.PAUSE_MAX - CONFIG.PAUSE_MIN);
+    
+    // Случайный "спайк" — дополнительная пауза для непредсказуемости
+    if (Math.random() < CONFIG.DELAY_SPIKE_CHANCE) {
+        delay += CONFIG.DELAY_SPIKE_MIN + Math.random() * (CONFIG.DELAY_SPIKE_MAX - CONFIG.DELAY_SPIKE_MIN);
+    }
+    
     setTimeout(() => {
         if (state.phase === 'wait' && state.active) showHeart();
     }, delay);
@@ -758,6 +894,36 @@ function showHeart() {
     }
 
     atmosphere.onRound(state.round, state.currentEvent === 'real', state.realHappened);
+    
+    // === Атмосферные эффекты ===
+    
+    // Показываем часы с раунда N
+    if (state.round === CONFIG.CLOCK_SHOW_ROUND) {
+        showClock();
+    }
+    
+    // Глитч часов (случайный)
+    if (state.round >= CONFIG.CLOCK_SHOW_ROUND) {
+        glitchClock();
+    }
+    
+    // Запускаем дыхание с раунда N
+    if (state.round === CONFIG.BREATH_START_ROUND) {
+        startBreathing();
+    }
+    
+    // Обновляем интенсивность дыхания
+    if (state.round >= CONFIG.BREATH_START_ROUND) {
+        updateBreathing(state.round, state.realScreamerRound);
+    }
+    
+    // Нарастающая вибрация
+    vibrateForRound(state.round, state.realScreamerRound);
+    
+    // Перед скримером — интенсифицируем часы
+    if (state.round === state.realScreamerRound - 1) {
+        intensifyClock();
+    }
 
     state.heartCaughtThisRound = false;
     state.returnedThisRound = false;
@@ -790,6 +956,11 @@ function showHeart() {
         if (el.screamerEmoji)
             el.screamerEmoji.textContent = C.SCREAMER_EMOJIS[Math.floor(Math.random() * C.SCREAMER_EMOJIS.length)];
         el.screamer.classList.add('active');
+        
+        // Резко обрываем дыхание — тишина перед криком
+        stopBreathing();
+        hideClock();
+        
         playScream();
         atmosphere.onScreamer();
 
@@ -963,6 +1134,8 @@ function fail() {
 // ============================================================
 function showResults() {
     stopAmbient();
+    stopBreathing();
+    hideClock();
     atmosphere.stop();
     unbindEvents();
 

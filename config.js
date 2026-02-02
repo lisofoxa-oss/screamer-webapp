@@ -17,13 +17,39 @@ const CONFIG = {
     MAX_HEART_Y_RATIO: 0.34,
     HEART_EDGE_PAD: 55,
 
-    // Timing
+    // Timing — base delays
     PAUSE_MIN: 1200,
     PAUSE_MAX: 3200,
     SCREAMER_HEART_DELAY: 150,
     FAKE_HEART_DELAY: 120,
     SCREAMER_HIDE_MS: 900,
     FAKE_HIDE_MS: 700,
+
+    // --- Random delay spikes (создают непредсказуемость) ---
+    DELAY_SPIKE_CHANCE: 0.25,      // 25% шанс дополнительной паузы
+    DELAY_SPIKE_MIN: 300,          // +0.3 сек
+    DELAY_SPIKE_MAX: 1200,         // +1.2 сек
+
+    // --- Vibration escalation (нарастание к скримеру) ---
+    VIBRATE_ENABLED: true,
+    VIBRATE_START_ROUND: 3,        // с какого раунда начинать
+    VIBRATE_PATTERN_LIGHT: [15],   // лёгкая
+    VIBRATE_PATTERN_MEDIUM: [25, 30, 25],  // средняя
+    VIBRATE_PATTERN_HEAVY: [40, 50, 40, 50, 40],  // сильная
+
+    // --- Glitch clock ---
+    CLOCK_ENABLED: true,
+    CLOCK_SHOW_ROUND: 2,           // показать с раунда 2
+    CLOCK_GLITCH_CHANCE: 0.3,      // шанс глитча каждый раунд
+    CLOCK_CREEPY_TIMES: ['03:33', '00:00', '13:13', '06:66', '23:59', '04:44'],
+
+    // --- Breathing sound ---
+    BREATH_ENABLED: true,
+    BREATH_START_ROUND: 4,         // начать дыхание с раунда 4
+    BREATH_VOLUME_START: 0.05,     // начальная громкость
+    BREATH_VOLUME_MAX: 0.25,       // максимальная перед скримером
+    BREATH_RATE_START: 1.0,        // начальная скорость
+    BREATH_RATE_MAX: 1.6,          // ускорение к скримеру
 
     SCREAMER_EMOJIS: ['👻', '💀', '😱', '🎃', '👹'],
 
@@ -72,6 +98,7 @@ const CONFIG = {
         'assets/sounds/riser.mp3',
         'assets/sounds/whisper.mp3',
         'assets/sounds/creak.mp3',
+        'assets/sounds/breath.mp3',
     ],
     PRELOAD_IMAGES: [
         'assets/images/background.jpg',
