@@ -1,20 +1,21 @@
 // ============================================================
-// metrics.js v4 — Формула v4 по данным 91 сессии
+// metrics.js v5 — Формула v5
 //
-// Ключевые изменения:
-// ① Freeze-детектор v2: работает БЕЗ shockDuration
-//    (microFreeze>250 || catchSlowdown+speedDrop || shock>400)
-// ② ShockDuration логарифмический, capped 700ms
-// ③ Recoil берёт лучший baseline (max pre, mid)
-// ④ Jerk: relative + absolute fallback (>7500)
-// ⑤ Flinch: порог 120ms delay + 18° dirError
-// ⑥ Floor 20 для freeze-ответов
-// ⑦ CatchTime slowdown не дублируется с freeze
+// ГЛАВНОЕ ИЗМЕНЕНИЕ: lost/missed = не "не играл", а "испугался"
 //
-// Два паттерна страха:
-//   FLINCH: jerk↑ recoil↑ dirError↑ sinuosity↑ (дёрнулся)
-//   FREEZE: microFreeze↑ speedVar↓ catchTime↑ (замер)
-// Оба должны давать высокий score.
+// Данные двух новых игроков:
+//   Девушка 1: shockDur=1817, traj=17px, pts=29 → ЗАМЕРЛА = 95+
+//   Девушка 2: shockDur=1813, traj=4px, pts=8  → ПАРАЛИЧ = 90+
+//   Старая формула: обе = 55. НЕПРАВИЛЬНО.
+//
+// Lost/missed теперь 55—100 в зависимости от:
+//   - shockDuration (как долго в шоке)
+//   - trajectoryLength (сколько реально двигался)
+//   - pointCount (палец на экране?)
+//   - avgSpeed (мог двигаться?)
+//   - Anti-lazy: если нет trajectory И нет shock → cap 60
+//
+// Остальная формула = v4 (freeze detector, log shock, etc.)
 // ============================================================
 
 function analyzeRound(traj) {
@@ -126,33 +127,117 @@ function avgMetrics(rounds) {
 }
 
 /**
- * Score 0–100 (v4) — по данным 91 сессии
+ * Score 0–100 (v5)
  *
- * Два паттерна: FLINCH (recoil↑ jerk↑) и FREEZE (microFreeze↑ speed↓)
- * Оба оцениваются адекватно.
- *
- * @param {object} scr        — данные раунда со скримером
- * @param {object} fake       — данные раунда с котиком
- * @param {object} avgPre     — усреднённый baseline (pre + mid)
- * @param {object} avgPost    — усреднённые post-раунды
- * @param {object|null} avgMid — усреднённые mid-раунды (отдельно, для лучшего baseline)
+ * @param {object} scr        — раунд со скримером
+ * @param {object} fake       — раунд с котиком
+ * @param {object} avgPre     — baseline (pre+mid)
+ * @param {object} avgPost    — post-раунды
+ * @param {object|null} avgMid — mid-раунды отдельно
  */
 function computeScore(scr, fake, avgPre, avgPost, avgMid) {
     let score = 0;
     const details = [];
 
-    // === LOST / MISSED ===
+    // =============================================================
+    // LOST / MISSED — теперь от 55 до 100
+    //
+    // Не поймать сердце после скримера = сильный показатель страха
+    // НО нужна защита от ленивых/непонявших
+    // =============================================================
     if (!scr || scr.lost) {
-        score += 55;
-        details.push('Lost/missed: +55');
-        if (avgPost.catchTime > avgPre.catchTime * 1.05) {
-            score += 5; details.push('PostDeg: +5');
+        // Извлекаем данные (даже у lost-раундов есть trajectory)
+        const shock   = scr?.shockDuration || 0;
+        const mf      = scr?.microFreeze || 0;
+        const tLen    = scr?.trajectoryLength || 0;
+        const pts     = scr?.pointCount || 0;
+        const avgSpd  = scr?.avgSpeed || 0;
+        const sd      = scr?.startDelay || 0;
+        const ct      = scr?.catchTime || 0;
+
+        // Палец был на экране?
+        const fingerOnScreen = pts >= 3;
+
+        // «Замёрзший палец» — много точек, но почти не двигался
+        const frozenFinger = fingerOnScreen && tLen < 60 && pts >= 5;
+
+        // Максимум шока = даже не начал двигаться
+        const totalParalysis = sd >= 1200 && tLen < 30;
+
+        let panicScore = 55; // база
+
+        if (fingerOnScreen) {
+            // У нас есть данные — анализируем ПОЧЕМУ не поймал
+
+            // TIER 1: Полный паралич — 90-100
+            if (shock >= 1500 || totalParalysis || (frozenFinger && shock >= 800)) {
+                panicScore = 95;
+                // Бонус за экстремальные значения
+                if (shock >= 1800 && tLen < 20) panicScore = 100;
+                else if (shock >= 1700 || (tLen < 10 && pts >= 5)) panicScore = 98;
+                details.push(`🔴 ПАРАЛИЧ: shock=${shock}ms, traj=${tLen.toFixed(0)}px, pts=${pts}`);
+            }
+            // TIER 2: Сильная паника — 80-90
+            else if (shock >= 1000 || mf >= 500 || (frozenFinger && shock >= 400)) {
+                panicScore = 85;
+                if (shock >= 1200) panicScore = 90;
+                details.push(`🟠 Сильная паника: shock=${shock}ms, freeze=${mf}ms`);
+            }
+            // TIER 3: Заметный испуг — 70-80
+            else if (shock >= 600 || mf >= 300 || (avgSpd < 100 && tLen < 100)) {
+                panicScore = 75;
+                if (shock >= 800) panicScore = 80;
+                details.push(`🟡 Заметный испуг: shock=${shock}ms, speed=${avgSpd.toFixed(0)}`);
+            }
+            // TIER 4: Умеренный — 60-70
+            else if (shock >= 300 || mf >= 150) {
+                panicScore = 65;
+                details.push(`Умеренный: shock=${shock}ms, freeze=${mf}ms`);
+            }
+            // TIER 5: Минимальный шок, но всё же не поймал — 55-60
+            else {
+                panicScore = 58;
+                details.push(`Не поймал: shock=${shock}ms`);
+            }
+
+            // Дополнительно: замёрзший палец (перекрывает если выше)
+            if (frozenFinger && panicScore < 85) {
+                panicScore = Math.max(panicScore, 85);
+                details.push(`🧊 Замёрзший палец: ${pts} точек, ${tLen.toFixed(0)}px`);
+            }
+
+        } else {
+            // Мало данных — палец был поднят или едва коснулся
+            // Защита от "просто не играл"
+            if (shock >= 1000) {
+                // Шок есть, просто убрал палец от страха — тоже страх!
+                panicScore = 80;
+                details.push(`Убрал палец + шок: shock=${shock}ms`);
+            } else if (shock >= 400) {
+                panicScore = 65;
+                details.push(`Минимум данных, есть шок: shock=${shock}ms`);
+            } else {
+                // Нет шока, нет движения → скорее ленивый / запутался
+                panicScore = 55;
+                details.push('Мало данных, нет шока → base 55');
+            }
         }
-        return { score: Math.min(100, score), details };
+
+        // Post degradation
+        const baseCT = avgPre.catchTime > 100 ? avgPre.catchTime : 700;
+        if (avgPost.catchTime > baseCT * 1.05) {
+            panicScore += 5;
+            details.push('PostDeg: +5');
+        }
+
+        return { score: Math.min(100, panicScore), details };
     }
 
+    // =============================================================
+    // CAUGHT — поймал сердце после скримера
+    // =============================================================
+
     // === BASELINE ===
-    // Для ratio-метрик берём MAX(pre, mid) = более строгий baseline
     const mid = avgMid && avgMid.catchTime > 100 ? avgMid : null;
     function bestBase(key) {
         const p = avgPre[key] || 0;
@@ -160,7 +245,6 @@ function computeScore(scr, fake, avgPre, avgPost, avgMid) {
         return Math.max(p, m) || p;
     }
 
-    // === RATIOS ===
     const baseRecoil   = bestBase('recoilDistance');
     const baseJerk     = bestBase('totalJerk');
     const baseCatch    = bestBase('catchTime');
@@ -218,16 +302,13 @@ function computeScore(scr, fake, avgPre, avgPost, avgMid) {
             jp += abs;
             details.push(`JerkAbs(${Math.round(scr.totalJerk)}): +${abs}`);
         }
-        const p = Math.min(16, jp);
-        score += p;
+        score += Math.min(16, jp);
     }
 
     // 4. 🧊 FREEZE DETECTOR v2 (max 25)
-    //    Работает даже без shockDuration — по microFreeze, catchRatio, speedVar
     if (isFreezeResponse) {
         let fp = 0;
 
-        // Длительность замирания (max 16)
         if (scr.microFreeze > 100) {
             const dur = Math.min(scr.microFreeze, 800);
             fp += Math.min(16, Math.round(
@@ -235,17 +316,14 @@ function computeScore(scr, fake, avgPre, avgPost, avgMid) {
             ));
         }
 
-        // Замедление поимки сердца (max 8)
         if (catchRatio > 1.05) {
             fp += Math.min(8, Math.round((catchRatio - 1) * 25));
         }
 
-        // Подавление скорости = «зажался» (max 5)
         if (svRatio < 0.85) {
             fp += Math.min(5, Math.round((1 - svRatio) * 15));
         }
 
-        // Абсолютно долгая поимка (max 5)
         if (scr.catchTime > 900) {
             fp += Math.min(5, Math.round((scr.catchTime - 900) / 100));
         }
@@ -262,20 +340,17 @@ function computeScore(scr, fake, avgPre, avgPost, avgMid) {
     // =============================================================
 
     // 5. CatchTime adrenaline/slowdown (max 10)
-    //    slowdown НЕ дублируется с freeze
     if (catchRatio < 0.85) {
-        // Адреналин: поймал БЫСТРЕЕ чем обычно
         const p = Math.min(10, Math.round((1 - catchRatio) * 50));
         score += p;
         details.push(`Adrenaline(x${catchRatio.toFixed(2)}): +${p}`);
     } else if (catchRatio > 1.1 && !isFreezeResponse) {
-        // Slowdown только если НЕ freeze (иначе уже засчитано)
         const p = Math.min(10, Math.round((catchRatio - 1) * 25));
         score += p;
         details.push(`Slowdown(x${catchRatio.toFixed(2)}): +${p}`);
     }
 
-    // 6. TrajectoryLength — лишнее расстояние (max 8)
+    // 6. TrajectoryLength (max 8)
     if (baseTraj > 0) {
         const ratio = scr.trajectoryLength / baseTraj;
         if (ratio > 1.15) {
@@ -285,7 +360,7 @@ function computeScore(scr, fake, avgPre, avgPost, avgMid) {
         }
     }
 
-    // 7. Sinuosity — зигзаги (max 5)
+    // 7. Sinuosity (max 5)
     if (scr.sinuosity > 1.02 && baseSin > 0) {
         const ratio = scr.sinuosity / baseSin;
         if (ratio > 1.15) {
@@ -299,14 +374,14 @@ function computeScore(scr, fake, avgPre, avgPost, avgMid) {
     // TIER 3 — Тонкие метрики (max ~20)
     // =============================================================
 
-    // 8. SpeedVariability (max 5, только для НЕ-freeze)
+    // 8. SpeedVariability (max 5, только non-freeze)
     if (!isFreezeResponse && baseSV > 0 && scr.speedVariability > baseSV * 1.15) {
         const p = Math.min(5, Math.round((scr.speedVariability / baseSV - 1) * 12));
         score += p;
         details.push(`SpeedVar: +${p}`);
     }
 
-    // 9. MicroFreeze (max 4, только если НЕ freeze — иначе уже засчитано)
+    // 9. MicroFreeze (max 4, только non-freeze)
     if (!isFreezeResponse && scr.microFreeze > 100) {
         const p = Math.min(4, Math.round(scr.microFreeze / 80));
         score += p;
@@ -320,14 +395,14 @@ function computeScore(scr, fake, avgPre, avgPost, avgMid) {
         details.push(`Contact: +${p}`);
     }
 
-    // 11. Force — нажим (max 5)
+    // 11. Force (max 5)
     if (scr.forceDelta > 0.02 && avgPre.forceAvg > 0) {
         const p = Math.min(5, Math.round(scr.forceDelta / 0.012));
         score += p;
         details.push(`Force: +${p}`);
     }
 
-    // 12. Real vs Fake — сравнение реакций (max 8)
+    // 12. Real vs Fake (max 8)
     if (fake && !fake.lost && scr.totalJerk > 0 && fake.totalJerk > 0) {
         const jr = scr.totalJerk / fake.totalJerk;
         if (jr > 1.3) {
@@ -349,8 +424,7 @@ function computeScore(scr, fake, avgPre, avgPost, avgMid) {
         details.push('PostDeg: +5');
     }
 
-    // 14. Flinch — рефлекторный бросок (max 8)
-    //     Улучшено: delay<120, dirError>18
+    // 14. Flinch (max 8)
     if (scr.startDelay < 120 && scr.directionError > 18) {
         const p = Math.min(8, Math.round(scr.directionError / 4));
         score += p;
@@ -358,7 +432,7 @@ function computeScore(scr, fake, avgPre, avgPost, avgMid) {
     }
 
     // =============================================================
-    // FLOOR — не дать freeze-ответам упасть слишком низко
+    // FLOOR — freeze-ответы не ниже 20
     // =============================================================
     if (isFreezeResponse && score < 20) {
         const boost = 20 - score;
