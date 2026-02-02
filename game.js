@@ -14,6 +14,7 @@ const tg = window.Telegram?.WebApp;
 if (tg) { tg.expand(); tg.ready(); }
 const urlParams = new URLSearchParams(window.location.search);
 const userId = urlParams.get('user_id') || tg?.initDataUnsafe?.user?.id;
+const isNewPlayer = urlParams.get('new') === '1';
 
 // === Fullscreen ===
 function requestFullscreen() {
@@ -988,6 +989,11 @@ function showResults() {
     el.heartsResult.textContent = `Поймано сердец: ${state.heartsCaught} из ${CONFIG.TOTAL_HEARTS}`;
 
     saveGame(score, scr, fake, avgPre, avgPost);
+
+    // Новый игрок: только кнопка «Закрыть»
+    const restartBtn = document.querySelector('#results .btn[onclick="restart()"]');
+    if (restartBtn) restartBtn.style.display = isNewPlayer ? 'none' : '';
+
     show('results');
 }
 
@@ -1029,6 +1035,7 @@ async function saveGame(score, scr, fake, avgPre, avgPost) {
         device_info: navigator.userAgent,
         telegram_id: userId,
         username: tg?.initDataUnsafe?.user?.username || 'unknown',
+        first_name: tg?.initDataUnsafe?.user?.first_name || '',
         scenario: state.scenarioKey || 'unknown',
         raw_pre_calib: state.preCalib,
         raw_mid_calib: state.midCalib,
