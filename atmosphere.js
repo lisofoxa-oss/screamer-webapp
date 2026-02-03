@@ -14,35 +14,35 @@ const ATM = {
     },
 
     PHASES: {
-        calm:       { drone:0.04, piano:0.30, heart:0.00, texture:0.00,
+        calm:       { drone:0.04, drone_low:0.00, piano:0.30, heart:0.00, texture:0.00, wind:0.00, static:0.00, demon:0.00,
                       grain:0.0,  grainSpeed:0.3, vignette:0.60, scanlines:0.00,
                       tint:0.00,  bgFilter:'none' },
 
-        uneasy:     { drone:0.18, piano:0.18, heart:0.12, texture:0.08,
+        uneasy:     { drone:0.18, drone_low:0.08, piano:0.18, heart:0.12, texture:0.08, wind:0.00, static:0.00, demon:0.00,
                       grain:0.12, grainSpeed:0.18, vignette:0.32, scanlines:0.06,
                       tint:0.25,  bgFilter:'brightness(0.72) saturate(0.75)' },
 
-        tension:    { drone:0.38, piano:0.05, heart:0.35, texture:0.20,
+        tension:    { drone:0.38, drone_low:0.18, piano:0.05, heart:0.35, texture:0.20, wind:0.00, static:0.00, demon:0.00,
                       grain:0.30, grainSpeed:0.10, vignette:0.12, scanlines:0.18,
                       tint:0.55,  bgFilter:'brightness(0.45) saturate(0.50) contrast(1.1)' },
 
-        pre_strike: { drone:0.48, piano:0.00, heart:0.50, texture:0.28,
+        pre_strike: { drone:0.48, drone_low:0.25, piano:0.00, heart:0.50, texture:0.28, wind:0.00, static:0.00, demon:0.00,
                       grain:0.42, grainSpeed:0.05, vignette:0.03, scanlines:0.28,
                       tint:0.80,  bgFilter:'brightness(0.30) saturate(0.30) contrast(1.2)' },
 
-        false_calm: { drone:0.02, piano:0.08, heart:0.00, texture:0.00,
+        false_calm: { drone:0.02, drone_low:0.00, piano:0.08, heart:0.00, texture:0.00, wind:0.06, static:0.00, demon:0.00,
                       grain:0.0,  grainSpeed:0.3, vignette:0.55, scanlines:0.00,
                       tint:0.00,  bgFilter:'brightness(0.92)' },
 
-        silence:    { drone:0.00, piano:0.00, heart:0.00, texture:0.00,
+        silence:    { drone:0.00, drone_low:0.12, piano:0.00, heart:0.00, texture:0.00, wind:0.00, static:0.10, demon:0.18,
                       grain:0.25, grainSpeed:0.12, vignette:0.02, scanlines:0.12,
                       tint:0.70,  bgFilter:'brightness(0.20) saturate(0.10) contrast(1.3)' },
 
-        post:       { drone:0.06, piano:0.20, heart:0.00, texture:0.00,
+        post:       { drone:0.06, drone_low:0.00, piano:0.20, heart:0.00, texture:0.00, wind:0.00, static:0.00, demon:0.00,
                       grain:0.0,  grainSpeed:0.3, vignette:0.50, scanlines:0.00,
                       tint:0.00,  bgFilter:'brightness(0.90)' },
 
-        linger:     { drone:0.28, piano:0.00, heart:0.20, texture:0.12,
+        linger:     { drone:0.28, drone_low:0.15, piano:0.00, heart:0.20, texture:0.12, wind:0.00, static:0.00, demon:0.00,
                       grain:0.25, grainSpeed:0.10, vignette:0.08, scanlines:0.10,
                       tint:0.50,  bgFilter:'brightness(0.40) saturate(0.40)' },
     },
@@ -181,11 +181,15 @@ class AtmosphereEngine {
         }
 
         const defs = [
-            { name:'drone',   src:'assets/sounds/drone.mp3',     loop:true },
-            { name:'piano',   elementId:'ambientSound',           loop:true },
-            { name:'heart',   src:'assets/sounds/heartbeat.mp3', loop:true },
-            { name:'texture', src:'assets/sounds/texture.mp3',   loop:true },
-            { name:'riser',   src:'assets/sounds/riser.mp3',     loop:false },
+            { name:'drone',     src:'assets/sounds/drone.mp3',         loop:true },
+            { name:'drone_low', src:'assets/sounds/drone_low.mp3',     loop:true },  // Субвуфер
+            { name:'piano',     elementId:'ambientSound',               loop:true },
+            { name:'heart',     src:'assets/sounds/heartbeat.mp3',     loop:true },
+            { name:'texture',   src:'assets/sounds/texture.mp3',       loop:true },
+            { name:'wind',      src:'assets/sounds/wind.mp3',          loop:true },  // Завывание
+            { name:'static',    src:'assets/sounds/static.mp3',        loop:true },  // Помехи
+            { name:'riser',     src:'assets/sounds/riser.mp3',         loop:false },
+            { name:'demon',     src:'assets/sounds/whisper_demon.mp3', loop:true },  // Для сценария D
         ];
 
         defs.forEach(def => {
@@ -209,7 +213,14 @@ class AtmosphereEngine {
             this.layers[def.name] = { gain, element, source, loop: !!def.loop };
         });
 
-        ['whisper','creak'].forEach(n => this._loadBuffer(`assets/sounds/${n}.mp3`, n));
+        // One-shot звуки (короткие эффекты)
+        const oneShots = [
+            'whisper', 'creak',           // Старые
+            'footstep', 'breath_close',   // Присутствие
+            'knock', 'metal', 'glass',    // Резкие
+            'voice_reverse'               // Сюрреализм
+        ];
+        oneShots.forEach(n => this._loadBuffer(`assets/sounds/${n}.mp3`, n));
     }
 
     async _loadBuffer(url, name) {
@@ -463,7 +474,7 @@ class AtmosphereEngine {
             audioMs = 3000; transMs = '3s';
         }
 
-        ['drone','piano','heart','texture'].forEach(n => {
+        ['drone','drone_low','piano','heart','texture','wind','static','demon'].forEach(n => {
             if (p[n] !== undefined) this._fadeLayer(n, p[n], audioMs);
         });
 

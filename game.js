@@ -108,26 +108,61 @@ function stopBreathing() {
 
 // === Micro-sounds (шорохи в тишине) ===
 // Создают ощущение "что-то сейчас будет"
+
+// Пулы звуков по типу
+const MICRO_SOUNDS = {
+    // Тихие, едва слышные
+    subtle: ['creak', 'whisper', 'texture'],
+    // Присутствие — кто-то рядом
+    presence: ['footstep', 'breath_close', 'knock'],
+    // Резкие — неожиданность
+    sharp: ['metal', 'glass'],
+    // Странные — сюрреализм
+    weird: ['voice_reverse']
+};
+
 function scheduleMicroSound(delayMs) {
     if (!soundOn) return;
-    if (state.round < 3) return;  // не слишком рано
-    if (state.realHappened) return;  // не после скримера
+    if (state.round < 3) return;
+    if (state.realHappened) return;
     
-    // 30% шанс микро-шороха
-    if (Math.random() > 0.30) return;
+    // Шанс увеличивается к скримеру
+    const progress = state.round / state.realScreamerRound;
+    const chance = 0.20 + progress * 0.25;  // 20% → 45%
+    if (Math.random() > chance) return;
     
     setTimeout(() => {
         if (state.phase !== 'wait' || !state.active) return;
         
-        // Используем atmosphere для воспроизведения тихого звука
-        const sounds = ['creak', 'whisper', 'texture'];
-        const sound = sounds[Math.floor(Math.random() * sounds.length)];
+        // Выбираем тип звука в зависимости от прогресса
+        let pool;
+        const roll = Math.random();
         
-        // Вызываем atmosphere для one-shot звука
-        if (atmosphere && atmosphere._playOneShot) {
-            atmosphere._playOneShot(sound, 0.08 + Math.random() * 0.07);  // очень тихо
+        if (progress < 0.4) {
+            // Начало — только тихие
+            pool = MICRO_SOUNDS.subtle;
+        } else if (progress < 0.7) {
+            // Середина — добавляем присутствие
+            pool = roll < 0.6 ? MICRO_SOUNDS.subtle : MICRO_SOUNDS.presence;
+        } else {
+            // Близко к скримеру — всё
+            if (roll < 0.3) pool = MICRO_SOUNDS.subtle;
+            else if (roll < 0.6) pool = MICRO_SOUNDS.presence;
+            else if (roll < 0.85) pool = MICRO_SOUNDS.sharp;
+            else pool = MICRO_SOUNDS.weird;
         }
-    }, delayMs * (0.3 + Math.random() * 0.4));  // где-то в середине ожидания
+        
+        const sound = pool[Math.floor(Math.random() * pool.length)];
+        
+        // Громкость: тихо в начале, громче к скримеру
+        const baseVol = 0.06 + progress * 0.08;  // 0.06 → 0.14
+        const vol = baseVol + Math.random() * 0.05;
+        
+        if (atmosphere && atmosphere._playOneShot) {
+            atmosphere._playOneShot(sound, vol);
+            console.log(`👻 Micro-sound: ${sound} (${Math.round(vol*100)}%)`);
+        }
+    }, delayMs * (0.3 + Math.random() * 0.4));
 }
 
 // === Glitch Clock Control ===
