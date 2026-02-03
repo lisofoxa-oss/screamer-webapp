@@ -106,6 +106,30 @@ function stopBreathing() {
     }
 }
 
+// === Micro-sounds (шорохи в тишине) ===
+// Создают ощущение "что-то сейчас будет"
+function scheduleMicroSound(delayMs) {
+    if (!soundOn) return;
+    if (state.round < 3) return;  // не слишком рано
+    if (state.realHappened) return;  // не после скримера
+    
+    // 30% шанс микро-шороха
+    if (Math.random() > 0.30) return;
+    
+    setTimeout(() => {
+        if (state.phase !== 'wait' || !state.active) return;
+        
+        // Используем atmosphere для воспроизведения тихого звука
+        const sounds = ['creak', 'whisper', 'texture'];
+        const sound = sounds[Math.floor(Math.random() * sounds.length)];
+        
+        // Вызываем atmosphere для one-shot звука
+        if (atmosphere && atmosphere._playOneShot) {
+            atmosphere._playOneShot(sound, 0.08 + Math.random() * 0.07);  // очень тихо
+        }
+    }, delayMs * (0.3 + Math.random() * 0.4));  // где-то в середине ожидания
+}
+
 // === Glitch Clock Control ===
 const clockEl = document.getElementById('glitchClock');
 let clockInterval = null;
@@ -877,6 +901,9 @@ function enterZone(x, y) {
         delay += CONFIG.DELAY_SPIKE_MIN + Math.random() * (CONFIG.DELAY_SPIKE_MAX - CONFIG.DELAY_SPIKE_MIN);
     }
     
+    // Микро-шорох в тишине (создаёт тревогу)
+    scheduleMicroSound(delay);
+    
     setTimeout(() => {
         if (state.phase === 'wait' && state.active) showHeart();
     }, delay);
@@ -997,6 +1024,7 @@ function showHeart() {
 
         setTimeout(() => el.fakeScreamer.classList.remove('active'), C.FAKE_HIDE_MS);
         state.fakeHappened = true;
+        atmosphere.onFakeComplete(state.round);
 
     } else {
         state.phase = 'toHeart';

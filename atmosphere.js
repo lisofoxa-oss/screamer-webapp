@@ -80,6 +80,7 @@ class AtmosphereEngine {
         this.bgFlashCount = 0;
         this.singleSoundPlayed = false;
         this.falseScreamerDone = false;
+        this.fakeCompletedAtRound = -1;
         this.lingerActive = false;
         this.pointerParanoia = false;
         this._oneShotsScheduled = false;
@@ -124,6 +125,7 @@ class AtmosphereEngine {
         this.bgFlashCount = 0;
         this.singleSoundPlayed = false;
         this.falseScreamerDone = false;
+        this.fakeCompletedAtRound = -1;
         this.lingerActive = false;
         this.pointerParanoia = false;
         this._oneShotsScheduled = false;
@@ -358,6 +360,12 @@ class AtmosphereEngine {
         }, 80);
     }
 
+    // === FAKE SCREAMER COMPLETE ===
+    onFakeComplete(round) {
+        this.fakeCompletedAtRound = round;
+        console.log(`🐱 Fake screamer at round ${round} — enabling false_calm`);
+    }
+
     // === ROUND HOOK ===
     onRound(roundNum, isPreScreamer, isPostScreamer) {
         this.round = roundNum;
@@ -366,6 +374,22 @@ class AtmosphereEngine {
 
         if (isPostScreamer) {
             if (!this.lingerActive) this.setPhase('post');
+            return;
+        }
+
+        // === ЛОЖНОЕ ОБЛЕГЧЕНИЕ после fake screamer ===
+        // 2 раунда после котика — светло и спокойно, игрок расслабляется
+        const roundsAfterFake = this.fakeCompletedAtRound > 0 ? roundNum - this.fakeCompletedAtRound : -1;
+        const inFalseCalm = roundsAfterFake >= 0 && roundsAfterFake < 2;
+        
+        if (inFalseCalm && sc.buildup !== 'silence') {
+            this.setPhase('false_calm');
+            // Светлый фон, мягкая музыка — "опасность миновала"
+            this._setBgFilter('brightness(0.95) saturate(1.1)', '1.5s');
+            this._setVignette(0.65, '1.5s');
+            this._setTint(0, '1s');
+            this._setGrain(0, '1s');
+            console.log(`😌 False calm active (${roundsAfterFake + 1}/2)`);
             return;
         }
 
