@@ -1,47 +1,96 @@
 // ============================================================
-// camera.js v2 — Запись реакции на скример (FIXED)
+// camera.js v4 — Запись реакции (FULL DEBUG)
 //
-// Фиксы:
-// - Камера запускается асинхронно, не блокирует игру
-// - Улучшена логика буфера
-// - Корректный захват момента скримера
+// Изменения v4:
+// - Запрос камеры при клике на чекбокс (до игры)
+// - Debug панель показывает ВСЁ
+// - Более надёжная финализация видео
 // ============================================================
 
 const Camera = {
-    // Состояние
     enabled: false,
+    permissionGranted: false,
     stream: null,
     mediaRecorder: null,
     chunks: [],
     screamerTime: 0,
     finalBlob: null,
     captureInProgress: false,
+    mimeType: null,
     
-    // Настройки
-    BUFFER_MS: 5000,      // 5 сек ДО скримера
-    POST_MS: 3000,        // 3 сек ПОСЛЕ скримера
+    BUFFER_MS: 5000,
+    POST_MS: 3500,
     
-    // DOM
     previewEl: null,
     videoEl: null,
+    debugEl: null,
+    debugLines: [],
     
     // ============================================================
-    // ИНИЦИАЛИЗАЦИЯ
+    // INIT
     // ============================================================
     
     init() {
         this.previewEl = document.getElementById('cameraPreview');
         this.videoEl = document.getElementById('cameraVideo');
         
-        // Проверяем поддержку
-        if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-            console.log('📷 Camera/MediaRecorder not supported');
+        // Debug панель
+        this.debugEl = document.createElement('div');
+        this.debugEl.id = 'camDbg';
+        this.debugEl.style.cssText = 'position:fixed;bottom:5px;left:5px;background:rgba(0,0,0,0.85);color:#0f0;font-size:9px;padding:4px 6px;border-radius:4px;z-index:9999;font-family:monospace;max-width:180px;line-height:1.3;';
+        document.body.appendChild(this.debugEl);
+        
+        // Проверки
+        if (!navigator.mediaDevices?.getUserMedia) {
+            this.log('❌ No getUserMedia');
             this.hideOption();
             return false;
         }
         
-        console.log('📷 Camera module ready');
+        if (!window.MediaRecorder) {
+            this.log('❌ No MediaRecorder');
+            this.hideOption();
+            return false;
+        }
+        
+        // Находим формат
+        const types = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+        this.mimeType = types.find(t => MediaRecorder.isTypeSupported(t));
+        
+        if (!this.mimeType) {
+            this.log('❌ No format');
+            this.hideOption();
+            return false;
+        }
+        
+        this.log('✓ ' + this.mimeType.split(';')[0]);
+        
+        // Чекбокс
+        const checkbox = document.getElementById('cameraCheckbox');
+        if (checkbox) {
+            checkbox.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    this.requestPermission();
+                } else {
+                    this.stopStream();
+                }
+            });
+        }
+        
         return true;
+    },
+    
+    log(msg) {
+        const ts = new Date().toLocaleTimeString().slice(3, 8);
+        const line = ts + ' ' + msg;
+        console.log('📷', line);
+        
+        this.debugLines.push(line);
+        if (this.debugLines.length > 6) this.debugLines.shift();
+        
+        if (this.debugEl) {
+            this.debugEl.innerHTML = this.debugLines.join('<br>');
+        }
     },
     
     hideOption() {
@@ -50,66 +99,67 @@ const Camera = {
     },
     
     isEnabled() {
-        const checkbox = document.getElementById('cameraCheckbox');
-        return checkbox && checkbox.checked;
+        const cb = document.getElementById('cameraCheckbox');
+        return cb && cb.checked && this.permissionGranted;
     },
     
     // ============================================================
-    // ЗАПУСК (не блокирует!)
+    // PERMISSION (при клике на чекбокс)
     // ============================================================
     
-    start() {
-        if (!this.isEnabled()) {
-            console.log('📷 Camera disabled by user');
-            return;
-        }
+    async requestPermission() {
+        this.log('Requesting...');
         
-        // Запускаем асинхронно, не ждём
-        this._startAsync().catch(err => {
-            console.log('📷 Camera failed:', err.message);
-        });
-    },
-    
-    async _startAsync() {
         try {
             this.stream = await navigator.mediaDevices.getUserMedia({
                 video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 640 } },
                 audio: false
             });
             
-            // Показываем превью
             if (this.videoEl) {
                 this.videoEl.srcObject = this.stream;
-                await this.videoEl.play().catch(() => {});
+                this.videoEl.play().catch(() => {});
             }
             if (this.previewEl) {
                 this.previewEl.classList.add('active');
             }
             
-            // Запускаем запись
-            this._startRecording();
-            this.enabled = true;
-            console.log('📷 Camera started');
+            this.permissionGranted = true;
+            this.log('✓ Camera OK');
             
         } catch (err) {
-            console.log('📷 Camera error:', err.message);
-            this.enabled = false;
+            this.log('❌ ' + err.name);
+            this.permissionGranted = false;
+            const cb = document.getElementById('cameraCheckbox');
+            if (cb) cb.checked = false;
         }
     },
     
+    stopStream() {
+        if (this.stream) {
+            this.stream.getTracks().forEach(t => t.stop());
+            this.stream = null;
+        }
+        if (this.previewEl) this.previewEl.classList.remove('active');
+        if (this.videoEl) this.videoEl.srcObject = null;
+        this.permissionGranted = false;
+        this.log('Stream off');
+    },
+    
     // ============================================================
-    // ЗАПИСЬ
+    // START RECORDING (при старте игры)
     // ============================================================
     
-    _startRecording() {
-        if (!this.stream) return;
+    start() {
+        this.log('start() called');
         
-        // Выбираем формат
-        const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4']
-            .find(t => MediaRecorder.isTypeSupported(t));
+        if (!this.isEnabled()) {
+            this.log('Not enabled');
+            return;
+        }
         
-        if (!mimeType) {
-            console.log('📷 No supported format');
+        if (!this.stream) {
+            this.log('No stream!');
             return;
         }
         
@@ -120,113 +170,144 @@ const Camera = {
         
         try {
             this.mediaRecorder = new MediaRecorder(this.stream, {
-                mimeType,
-                videoBitsPerSecond: 800000
+                mimeType: this.mimeType,
+                videoBitsPerSecond: 1000000
             });
             
             this.mediaRecorder.ondataavailable = (e) => {
-                if (e.data?.size > 0) {
+                if (e.data && e.data.size > 0) {
                     this.chunks.push({ data: e.data, time: Date.now() });
+                    this.log('Chunk #' + this.chunks.length + ' ' + Math.round(e.data.size/1024) + 'K');
                     
-                    // Держим только последние 10 сек (буфер)
+                    // Буфер 12 сек
                     if (!this.captureInProgress) {
-                        const cutoff = Date.now() - 10000;
+                        const cutoff = Date.now() - 12000;
                         this.chunks = this.chunks.filter(c => c.time > cutoff);
                     }
                 }
             };
             
-            this.mediaRecorder.start(300);  // chunks каждые 300ms
-            console.log('📷 Recording started, format:', mimeType);
+            this.mediaRecorder.onerror = (e) => {
+                this.log('❌ Error: ' + (e.error?.name || 'unknown'));
+            };
+            
+            this.mediaRecorder.onstart = () => {
+                this.log('▶ Recording');
+                this.enabled = true;
+            };
+            
+            this.mediaRecorder.onstop = () => {
+                this.log('⏹ Stopped');
+            };
+            
+            // Запуск
+            this.mediaRecorder.start(400);
+            this.log('Recorder started');
             
         } catch (err) {
-            console.log('📷 Recorder error:', err);
+            this.log('❌ ' + err.message);
         }
     },
     
     // ============================================================
-    // МОМЕНТ СКРИМЕРА
+    // ON SCREAMER
     // ============================================================
     
     onScreamer() {
-        if (!this.enabled || !this.mediaRecorder) return;
+        this.log('onScreamer()');
+        
+        if (!this.enabled) {
+            this.log('Not enabled');
+            return;
+        }
+        
+        if (!this.mediaRecorder) {
+            this.log('No recorder');
+            return;
+        }
+        
+        if (this.mediaRecorder.state !== 'recording') {
+            this.log('State: ' + this.mediaRecorder.state);
+            return;
+        }
         
         this.screamerTime = Date.now();
         this.captureInProgress = true;
-        console.log('📷 Screamer! Capturing...');
+        this.log('😱 CAPTURED! ' + this.chunks.length + ' chunks');
         
-        // Записываем ещё POST_MS секунд, потом стоп
+        // Ждём POST_MS
         setTimeout(() => {
-            this._stopAndFinalize();
+            this.finalize();
         }, this.POST_MS);
     },
     
-    _stopAndFinalize() {
-        if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive') {
-            this._createFinalVideo();
+    finalize() {
+        this.log('finalize()');
+        
+        if (!this.mediaRecorder) {
+            this.createVideo();
             return;
         }
         
-        this.mediaRecorder.onstop = () => {
-            this._createFinalVideo();
-        };
-        
-        try {
-            this.mediaRecorder.stop();
-        } catch (e) {
-            this._createFinalVideo();
+        // Получаем последние данные
+        if (this.mediaRecorder.state === 'recording') {
+            try {
+                this.mediaRecorder.requestData();
+            } catch (e) {}
         }
+        
+        // Даём время на обработку
+        setTimeout(() => {
+            if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+                try {
+                    this.mediaRecorder.stop();
+                } catch (e) {}
+            }
+            
+            setTimeout(() => {
+                this.createVideo();
+            }, 500);
+        }, 300);
     },
     
-    _createFinalVideo() {
+    createVideo() {
+        this.log('createVideo: ' + this.chunks.length + ' chunks');
+        
         if (this.chunks.length === 0) {
-            console.log('📷 No chunks');
+            this.log('❌ 0 chunks!');
             return;
         }
         
-        // Берём chunks: BUFFER_MS до скримера + POST_MS после
-        const startTime = this.screamerTime - this.BUFFER_MS;
-        const endTime = this.screamerTime + this.POST_MS + 500;  // +500ms запас
+        // Собираем все blobs
+        const blobs = this.chunks.map(c => c.data);
+        const totalSize = blobs.reduce((s, b) => s + b.size, 0);
         
-        let relevantChunks = this.chunks.filter(c => c.time >= startTime && c.time <= endTime);
+        this.log('Total: ' + Math.round(totalSize / 1024) + 'KB');
         
-        // Если мало — берём все
-        if (relevantChunks.length < 3) {
-            relevantChunks = this.chunks;
-        }
+        this.finalBlob = new Blob(blobs, { type: this.mimeType });
         
-        const blobs = relevantChunks.map(c => c.data);
-        this.finalBlob = new Blob(blobs, { type: blobs[0]?.type || 'video/webm' });
+        this.log('✓ Blob: ' + Math.round(this.finalBlob.size / 1024) + 'KB');
         
-        console.log('📷 Video ready:', Math.round(this.finalBlob.size / 1024), 'KB,', relevantChunks.length, 'chunks');
-        
-        // Показываем кнопку
+        // Кнопка
         const btn = document.getElementById('viewReactionBtn');
-        if (btn && this.finalBlob.size > 1000) {
+        if (btn && this.finalBlob.size > 10000) {
             btn.style.display = 'block';
+            this.log('Button ON');
+        } else {
+            this.log('Too small');
         }
     },
     
     // ============================================================
-    // STOP & CLEANUP
+    // STOP & RESET
     // ============================================================
     
     stop() {
-        if (this.mediaRecorder?.state !== 'inactive') {
+        if (this.mediaRecorder?.state === 'recording') {
             try { this.mediaRecorder.stop(); } catch (e) {}
         }
-        
-        if (this.stream) {
-            this.stream.getTracks().forEach(t => t.stop());
-            this.stream = null;
-        }
-        
-        if (this.previewEl) this.previewEl.classList.remove('active');
-        if (this.videoEl) this.videoEl.srcObject = null;
-        
         this.enabled = false;
         this.mediaRecorder = null;
-        console.log('📷 Camera stopped');
     },
     
     reset() {
@@ -234,9 +315,12 @@ const Camera = {
         this.screamerTime = 0;
         this.finalBlob = null;
         this.captureInProgress = false;
+        this.enabled = false;
         
         const btn = document.getElementById('viewReactionBtn');
         if (btn) btn.style.display = 'none';
+        
+        this.log('Reset');
     },
     
     // ============================================================
@@ -244,47 +328,60 @@ const Camera = {
     // ============================================================
     
     showPreview() {
-        if (!this.finalBlob || this.finalBlob.size < 1000) {
-            console.log('📷 No video to show');
+        this.log('showPreview()');
+        
+        if (!this.finalBlob) {
+            this.log('No blob');
+            return false;
+        }
+        
+        if (this.finalBlob.size < 10000) {
+            this.log('Blob too small');
             return false;
         }
         
         const video = document.getElementById('reactionVideo');
         if (video) {
             video.src = URL.createObjectURL(this.finalBlob);
+            this.log('Preview set');
         }
         return true;
     },
     
     download() {
-        if (!this.finalBlob) return;
+        if (!this.finalBlob) {
+            this.log('Nothing to download');
+            return;
+        }
+        
+        this.log('Downloading...');
         
         const url = URL.createObjectURL(this.finalBlob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `reaction_${Date.now()}.webm`;
+        a.download = 'reaction.webm';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
     },
     
     async share() {
         if (!this.finalBlob) return;
         
+        this.log('Sharing...');
+        
         if (navigator.share && navigator.canShare) {
             try {
                 const file = new File([this.finalBlob], 'reaction.webm', { type: this.finalBlob.type });
                 if (navigator.canShare({ files: [file] })) {
-                    await navigator.share({
-                        files: [file],
-                        title: 'Моя реакция 😱',
-                        text: 'Чёрная Роза'
-                    });
+                    await navigator.share({ files: [file], title: 'Моя реакция 😱' });
                     return;
                 }
             } catch (err) {
                 if (err.name === 'AbortError') return;
+                this.log('Share err: ' + err.name);
             }
         }
         this.download();
@@ -294,7 +391,7 @@ const Camera = {
 // Init
 document.addEventListener('DOMContentLoaded', () => Camera.init());
 
-// Global functions for HTML
+// Globals
 function showReactionPreview() {
     if (Camera.showPreview()) {
         document.getElementById('results')?.classList.remove('active');
