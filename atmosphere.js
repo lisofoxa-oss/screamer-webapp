@@ -34,7 +34,7 @@ const ATM = {
                       grain:0.0,  grainSpeed:0.3, vignette:0.55, scanlines:0.00,
                       tint:0.00,  bgFilter:'brightness(0.92)' },
 
-        silence:    { drone:0.00, drone_low:0.12, piano:0.00, heart:0.00, texture:0.00, wind:0.00, static:0.10, demon:0.18,
+        silence:    { drone:0.00, drone_low:0.12, piano:0.00, heart:0.00, texture:0.00, wind:0.00, static:0.08, demon:0.06,
                       grain:0.25, grainSpeed:0.12, vignette:0.02, scanlines:0.12,
                       tint:0.70,  bgFilter:'brightness(0.20) saturate(0.10) contrast(1.3)' },
 

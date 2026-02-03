@@ -331,20 +331,39 @@ const Camera = {
         this.log('showPreview()');
         
         if (!this.finalBlob) {
-            this.log('No blob');
+            this.log('No blob!');
             return false;
         }
         
+        this.log('Blob size: ' + this.finalBlob.size);
+        this.log('Blob type: ' + this.finalBlob.type);
+        
         if (this.finalBlob.size < 10000) {
-            this.log('Blob too small');
+            this.log('Too small!');
             return false;
         }
         
         const video = document.getElementById('reactionVideo');
-        if (video) {
-            video.src = URL.createObjectURL(this.finalBlob);
-            this.log('Preview set');
+        if (!video) {
+            this.log('No video element!');
+            return false;
         }
+        
+        // Создаём URL
+        const url = URL.createObjectURL(this.finalBlob);
+        this.log('URL: ' + url.slice(0, 30) + '...');
+        
+        // Устанавливаем
+        video.src = url;
+        video.load();
+        
+        // Пробуем play
+        video.play().then(() => {
+            this.log('Playing!');
+        }).catch(e => {
+            this.log('Play err: ' + e.name);
+        });
+        
         return true;
     },
     
@@ -354,17 +373,37 @@ const Camera = {
             return;
         }
         
-        this.log('Downloading...');
+        this.log('Download: ' + Math.round(this.finalBlob.size/1024) + 'KB');
         
         const url = URL.createObjectURL(this.finalBlob);
+        
+        // Способ 1: a.click()
         const a = document.createElement('a');
         a.href = url;
         a.download = 'reaction.webm';
+        a.style.display = 'none';
         document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
         
-        setTimeout(() => URL.revokeObjectURL(url), 2000);
+        try {
+            a.click();
+            this.log('click() OK');
+        } catch (e) {
+            this.log('click() fail');
+        }
+        
+        setTimeout(() => {
+            document.body.removeChild(a);
+        }, 500);
+        
+        // Способ 2: Через 2 сек открыть в новой вкладке (если click не сработал)
+        setTimeout(() => {
+            this.log('Trying window.open...');
+            try {
+                window.open(url, '_blank');
+            } catch (e) {
+                this.log('open fail');
+            }
+        }, 2000);
     },
     
     async share() {
