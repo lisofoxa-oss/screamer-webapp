@@ -58,6 +58,16 @@
                 <div class="step"><div class="step-icon">↩️</div><div class="step-text">Поймал — <strong>вернись в круг</strong></div></div>
             </div>
             <div class="rule">⚡ Не отрывай палец от экрана!</div>
+            
+            <!-- Camera option -->
+            <div class="camera-option" id="cameraOption">
+                <label class="camera-toggle">
+                    <input type="checkbox" id="cameraCheckbox">
+                    <span class="camera-toggle-text">📹 Записать мою реакцию</span>
+                </label>
+                <div class="camera-hint">Видео останется только у тебя</div>
+            </div>
+            
             <div class="tutorial-buttons">
                 <button class="btn btn-play" onclick="skipToGame()">Играть</button>
             </div>
@@ -66,6 +76,12 @@
 
     <!-- Game -->
     <div id="game" class="screen">
+        <!-- Camera preview (маленькое окошко) -->
+        <div class="camera-preview" id="cameraPreview">
+            <video id="cameraVideo" autoplay muted playsinline></video>
+            <div class="camera-rec" id="cameraRec">●REC</div>
+        </div>
+        
         <div class="instruction" id="instruction">Положи палец в круг</div>
 
         <!-- Glitchy clock -->
@@ -128,8 +144,27 @@
                 <p style="margin-top:10px;color:#22c55e;font-size:11px;">✅ Результат сохранён</p>
             </div>
         </div>
+        <!-- Кнопка просмотра реакции (если записывали) -->
+        <button class="btn btn-reaction" id="viewReactionBtn" style="display:none;" onclick="showReactionPreview()">
+            👀 Посмотреть реакцию
+        </button>
         <button class="btn" onclick="restart()">Ещё раз</button>
         <button class="btn btn-secondary" onclick="closeApp()">Выйти</button>
+    </div>
+
+    <!-- Reaction Preview -->
+    <div id="reactionPreview" class="screen">
+        <div class="reaction-card">
+            <h2>Твоя реакция 😱</h2>
+            <div class="reaction-video-container">
+                <video id="reactionVideo" controls playsinline></video>
+            </div>
+            <div class="reaction-buttons">
+                <button class="btn" onclick="downloadReaction()">💾 Сохранить</button>
+                <button class="btn" onclick="shareReaction()">📤 Поделиться</button>
+            </div>
+            <button class="btn btn-secondary" onclick="closeReactionPreview()">Назад к результатам</button>
+        </div>
     </div>
 
     <!-- Audio -->
@@ -142,6 +177,7 @@
     <script src="config.js"></script>
     <script src="atmosphere.js"></script>
     <script src="metrics.js"></script>
+    <script src="camera.js"></script>
     <script src="game.js"></script>
 </body>
 </html>

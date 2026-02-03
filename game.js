@@ -327,8 +327,10 @@ function placeHeart(minDist) {
 // SCREENS
 // ============================================================
 function show(name) {
-    ['warning','loading','intro','tutorial','game','trainDone','results'].forEach(s =>
-        el[s]?.classList.toggle('active', s === name));
+    ['warning','loading','intro','tutorial','game','trainDone','results','reactionPreview'].forEach(s => {
+        const elem = document.getElementById(s);
+        if (elem) elem.classList.toggle('active', s === name);
+    });
 }
 
 // ============================================================
@@ -727,6 +729,12 @@ function startGame() {
     // Сброс атмосферных эффектов
     stopBreathing();
     hideClock();
+    
+    // Камера — сброс и запуск если включена
+    if (typeof Camera !== 'undefined') {
+        Camera.reset();
+        Camera.start();
+    }
 
     Object.assign(state, {
         phase:'wait', round:0, active:false, isTraining: false,
@@ -1023,6 +1031,11 @@ function showHeart() {
         stopBreathing();
         hideClock();
         
+        // Захват реакции на камеру
+        if (typeof Camera !== 'undefined') {
+            Camera.onScreamer();
+        }
+        
         playScream();
         atmosphere.onScreamer();
 
@@ -1201,6 +1214,11 @@ function showResults() {
     hideClock();
     atmosphere.stop();
     unbindEvents();
+    
+    // Останавливаем камеру
+    if (typeof Camera !== 'undefined') {
+        Camera.stop();
+    }
 
     const scr = state.realScreamer || { lost: true };
     const fake = state.fakeScreamer;
