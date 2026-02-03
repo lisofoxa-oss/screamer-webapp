@@ -1,10 +1,5 @@
 // ============================================================
-// camera.js v4 — Запись реакции (FULL DEBUG)
-//
-// Изменения v4:
-// - Запрос камеры при клике на чекбокс (до игры)
-// - Debug панель показывает ВСЁ
-// - Более надёжная финализация видео
+// camera.js v5 — Telegram WebApp compatible
 // ============================================================
 
 const Camera = {
@@ -15,6 +10,7 @@ const Camera = {
     chunks: [],
     screamerTime: 0,
     finalBlob: null,
+    dataUrl: null,  // Храним готовый data URL
     captureInProgress: false,
     mimeType: null,
     
@@ -34,15 +30,13 @@ const Camera = {
         this.previewEl = document.getElementById('cameraPreview');
         this.videoEl = document.getElementById('cameraVideo');
         
-        // Debug панель
+        // Debug
         this.debugEl = document.createElement('div');
-        this.debugEl.id = 'camDbg';
-        this.debugEl.style.cssText = 'position:fixed;bottom:5px;left:5px;background:rgba(0,0,0,0.85);color:#0f0;font-size:9px;padding:4px 6px;border-radius:4px;z-index:9999;font-family:monospace;max-width:180px;line-height:1.3;';
+        this.debugEl.style.cssText = 'position:fixed;bottom:5px;left:5px;background:rgba(0,0,0,0.9);color:#0f0;font-size:9px;padding:4px 6px;border-radius:4px;z-index:9999;font-family:monospace;max-width:200px;line-height:1.3;';
         document.body.appendChild(this.debugEl);
         
-        // Проверки
         if (!navigator.mediaDevices?.getUserMedia) {
-            this.log('❌ No getUserMedia');
+            this.log('❌ No camera API');
             this.hideOption();
             return false;
         }
@@ -53,7 +47,6 @@ const Camera = {
             return false;
         }
         
-        // Находим формат
         const types = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
         this.mimeType = types.find(t => MediaRecorder.isTypeSupported(t));
         
@@ -65,15 +58,11 @@ const Camera = {
         
         this.log('✓ ' + this.mimeType.split(';')[0]);
         
-        // Чекбокс
         const checkbox = document.getElementById('cameraCheckbox');
         if (checkbox) {
             checkbox.addEventListener('change', (e) => {
-                if (e.target.checked) {
-                    this.requestPermission();
-                } else {
-                    this.stopStream();
-                }
+                if (e.target.checked) this.requestPermission();
+                else this.stopStream();
             });
         }
         
@@ -81,16 +70,10 @@ const Camera = {
     },
     
     log(msg) {
-        const ts = new Date().toLocaleTimeString().slice(3, 8);
-        const line = ts + ' ' + msg;
-        console.log('📷', line);
-        
-        this.debugLines.push(line);
-        if (this.debugLines.length > 6) this.debugLines.shift();
-        
-        if (this.debugEl) {
-            this.debugEl.innerHTML = this.debugLines.join('<br>');
-        }
+        console.log('📷', msg);
+        this.debugLines.push(msg);
+        if (this.debugLines.length > 5) this.debugLines.shift();
+        if (this.debugEl) this.debugEl.innerHTML = this.debugLines.join('<br>');
     },
     
     hideOption() {
@@ -104,29 +87,23 @@ const Camera = {
     },
     
     // ============================================================
-    // PERMISSION (при клике на чекбокс)
+    // PERMISSION
     // ============================================================
     
     async requestPermission() {
-        this.log('Requesting...');
-        
+        this.log('Requesting camera...');
         try {
             this.stream = await navigator.mediaDevices.getUserMedia({
                 video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 640 } },
                 audio: false
             });
-            
             if (this.videoEl) {
                 this.videoEl.srcObject = this.stream;
                 this.videoEl.play().catch(() => {});
             }
-            if (this.previewEl) {
-                this.previewEl.classList.add('active');
-            }
-            
+            if (this.previewEl) this.previewEl.classList.add('active');
             this.permissionGranted = true;
-            this.log('✓ Camera OK');
-            
+            this.log('✓ Camera ready');
         } catch (err) {
             this.log('❌ ' + err.name);
             this.permissionGranted = false;
@@ -143,43 +120,35 @@ const Camera = {
         if (this.previewEl) this.previewEl.classList.remove('active');
         if (this.videoEl) this.videoEl.srcObject = null;
         this.permissionGranted = false;
-        this.log('Stream off');
     },
     
     // ============================================================
-    // START RECORDING (при старте игры)
+    // RECORDING
     // ============================================================
     
     start() {
-        this.log('start() called');
-        
-        if (!this.isEnabled()) {
-            this.log('Not enabled');
-            return;
-        }
-        
-        if (!this.stream) {
-            this.log('No stream!');
+        this.log('start()');
+        if (!this.isEnabled() || !this.stream) {
+            this.log('Skip');
             return;
         }
         
         this.chunks = [];
         this.screamerTime = 0;
         this.finalBlob = null;
+        this.dataUrl = null;
         this.captureInProgress = false;
         
         try {
             this.mediaRecorder = new MediaRecorder(this.stream, {
                 mimeType: this.mimeType,
-                videoBitsPerSecond: 1000000
+                videoBitsPerSecond: 800000
             });
             
             this.mediaRecorder.ondataavailable = (e) => {
-                if (e.data && e.data.size > 0) {
+                if (e.data?.size > 0) {
                     this.chunks.push({ data: e.data, time: Date.now() });
-                    this.log('Chunk #' + this.chunks.length + ' ' + Math.round(e.data.size/1024) + 'K');
-                    
-                    // Буфер 12 сек
+                    this.log('Chunk ' + this.chunks.length);
                     if (!this.captureInProgress) {
                         const cutoff = Date.now() - 12000;
                         this.chunks = this.chunks.filter(c => c.time > cutoff);
@@ -187,115 +156,78 @@ const Camera = {
                 }
             };
             
-            this.mediaRecorder.onerror = (e) => {
-                this.log('❌ Error: ' + (e.error?.name || 'unknown'));
-            };
-            
             this.mediaRecorder.onstart = () => {
-                this.log('▶ Recording');
+                this.log('▶ REC');
                 this.enabled = true;
             };
             
-            this.mediaRecorder.onstop = () => {
-                this.log('⏹ Stopped');
-            };
-            
-            // Запуск
             this.mediaRecorder.start(400);
-            this.log('Recorder started');
-            
         } catch (err) {
             this.log('❌ ' + err.message);
         }
     },
     
     // ============================================================
-    // ON SCREAMER
+    // SCREAMER
     // ============================================================
     
     onScreamer() {
-        this.log('onScreamer()');
-        
-        if (!this.enabled) {
-            this.log('Not enabled');
-            return;
-        }
-        
-        if (!this.mediaRecorder) {
-            this.log('No recorder');
-            return;
-        }
-        
-        if (this.mediaRecorder.state !== 'recording') {
-            this.log('State: ' + this.mediaRecorder.state);
+        this.log('onScreamer');
+        if (!this.enabled || !this.mediaRecorder || this.mediaRecorder.state !== 'recording') {
+            this.log('Skip: not recording');
             return;
         }
         
         this.screamerTime = Date.now();
         this.captureInProgress = true;
-        this.log('😱 CAPTURED! ' + this.chunks.length + ' chunks');
+        this.log('😱 ' + this.chunks.length + ' chunks');
         
-        // Ждём POST_MS
-        setTimeout(() => {
-            this.finalize();
-        }, this.POST_MS);
+        setTimeout(() => this.finalize(), this.POST_MS);
     },
     
     finalize() {
         this.log('finalize()');
         
-        if (!this.mediaRecorder) {
-            this.createVideo();
-            return;
+        if (this.mediaRecorder?.state === 'recording') {
+            try { this.mediaRecorder.requestData(); } catch (e) {}
         }
         
-        // Получаем последние данные
-        if (this.mediaRecorder.state === 'recording') {
-            try {
-                this.mediaRecorder.requestData();
-            } catch (e) {}
-        }
-        
-        // Даём время на обработку
         setTimeout(() => {
-            if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-                try {
-                    this.mediaRecorder.stop();
-                } catch (e) {}
+            if (this.mediaRecorder?.state === 'recording') {
+                try { this.mediaRecorder.stop(); } catch (e) {}
             }
-            
-            setTimeout(() => {
-                this.createVideo();
-            }, 500);
-        }, 300);
+            setTimeout(() => this.createVideo(), 300);
+        }, 200);
     },
     
     createVideo() {
-        this.log('createVideo: ' + this.chunks.length + ' chunks');
+        this.log('createVideo: ' + this.chunks.length);
         
         if (this.chunks.length === 0) {
-            this.log('❌ 0 chunks!');
+            this.log('❌ 0 chunks');
             return;
         }
         
-        // Собираем все blobs
         const blobs = this.chunks.map(c => c.data);
-        const totalSize = blobs.reduce((s, b) => s + b.size, 0);
-        
-        this.log('Total: ' + Math.round(totalSize / 1024) + 'KB');
-        
         this.finalBlob = new Blob(blobs, { type: this.mimeType });
         
-        this.log('✓ Blob: ' + Math.round(this.finalBlob.size / 1024) + 'KB');
+        this.log('Blob: ' + Math.round(this.finalBlob.size / 1024) + 'KB');
         
-        // Кнопка
-        const btn = document.getElementById('viewReactionBtn');
-        if (btn && this.finalBlob.size > 10000) {
-            btn.style.display = 'block';
-            this.log('Button ON');
-        } else {
-            this.log('Too small');
-        }
+        // Сразу конвертируем в data URL (для Telegram)
+        this.log('Converting...');
+        const reader = new FileReader();
+        reader.onload = () => {
+            this.dataUrl = reader.result;
+            this.log('✓ Data URL ready');
+            
+            const btn = document.getElementById('viewReactionBtn');
+            if (btn && this.dataUrl) {
+                btn.style.display = 'block';
+                this.log('Button ON');
+            }
+        };
+        reader.onerror = () => this.log('Convert error');
+        reader.readAsDataURL(this.finalBlob);
     },
     
     // ============================================================
@@ -314,134 +246,127 @@ const Camera = {
         this.chunks = [];
         this.screamerTime = 0;
         this.finalBlob = null;
+        this.dataUrl = null;
         this.captureInProgress = false;
         this.enabled = false;
-        
         const btn = document.getElementById('viewReactionBtn');
         if (btn) btn.style.display = 'none';
-        
-        this.log('Reset');
     },
     
     // ============================================================
-    // PREVIEW & SHARE
+    // SHOW VIDEO (unified for preview and download)
     // ============================================================
     
-    showPreview() {
-        this.log('showPreview()');
+    showVideo() {
+        this.log('showVideo()');
         
-        if (!this.finalBlob) {
-            this.log('No blob!');
+        if (!this.dataUrl) {
+            this.log('No data URL!');
+            alert('Видео ещё конвертируется, подожди пару секунд');
             return false;
         }
         
-        this.log('Blob size: ' + this.finalBlob.size);
-        this.log('Blob type: ' + this.finalBlob.type);
+        // Создаём fullscreen overlay с видео
+        let overlay = document.getElementById('videoOverlay');
+        if (overlay) overlay.remove();
         
-        if (this.finalBlob.size < 10000) {
-            this.log('Too small!');
-            return false;
+        overlay = document.createElement('div');
+        overlay.id = 'videoOverlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: #000;
+            z-index: 99999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 15px;
+        `;
+        
+        overlay.innerHTML = `
+            <div style="color:#fff;font-size:13px;text-align:center;margin-bottom:10px;">
+                Твоя реакция 😱
+            </div>
+            <video id="overlayVideo" controls playsinline
+                style="max-width:100%;max-height:55vh;border-radius:8px;background:#111;">
+            </video>
+            <div style="color:#888;font-size:11px;margin-top:12px;text-align:center;line-height:1.5;">
+                📱 Чтобы сохранить:<br>
+                <strong>Зажми видео</strong> → "Сохранить"
+            </div>
+            <div style="display:flex;gap:10px;margin-top:15px;">
+                <button id="overlayShare" style="padding:10px 20px;background:#8b5cf6;color:#fff;border:none;border-radius:8px;font-size:13px;">
+                    📤 Поделиться
+                </button>
+                <button id="overlayClose" style="padding:10px 20px;background:#333;color:#fff;border:none;border-radius:8px;font-size:13px;">
+                    Закрыть
+                </button>
+            </div>
+        `;
+        
+        document.body.appendChild(overlay);
+        
+        // Устанавливаем видео
+        const video = document.getElementById('overlayVideo');
+        if (video) {
+            video.src = this.dataUrl;
+            video.load();
         }
         
-        const video = document.getElementById('reactionVideo');
-        if (!video) {
-            this.log('No video element!');
-            return false;
-        }
+        // Кнопки
+        document.getElementById('overlayClose').onclick = () => overlay.remove();
+        document.getElementById('overlayShare').onclick = () => this.share();
         
-        // Создаём URL
-        const url = URL.createObjectURL(this.finalBlob);
-        this.log('URL: ' + url.slice(0, 30) + '...');
-        
-        // Устанавливаем
-        video.src = url;
-        video.load();
-        
-        // Пробуем play
-        video.play().then(() => {
-            this.log('Playing!');
-        }).catch(e => {
-            this.log('Play err: ' + e.name);
-        });
-        
+        this.log('Overlay shown');
         return true;
     },
     
-    download() {
+    async share() {
+        this.log('share()');
+        
         if (!this.finalBlob) {
-            this.log('Nothing to download');
+            this.log('No blob');
             return;
         }
-        
-        this.log('Download: ' + Math.round(this.finalBlob.size/1024) + 'KB');
-        
-        const url = URL.createObjectURL(this.finalBlob);
-        
-        // Способ 1: a.click()
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'reaction.webm';
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        
-        try {
-            a.click();
-            this.log('click() OK');
-        } catch (e) {
-            this.log('click() fail');
-        }
-        
-        setTimeout(() => {
-            document.body.removeChild(a);
-        }, 500);
-        
-        // Способ 2: Через 2 сек открыть в новой вкладке (если click не сработал)
-        setTimeout(() => {
-            this.log('Trying window.open...');
-            try {
-                window.open(url, '_blank');
-            } catch (e) {
-                this.log('open fail');
-            }
-        }, 2000);
-    },
-    
-    async share() {
-        if (!this.finalBlob) return;
-        
-        this.log('Sharing...');
         
         if (navigator.share && navigator.canShare) {
             try {
                 const file = new File([this.finalBlob], 'reaction.webm', { type: this.finalBlob.type });
                 if (navigator.canShare({ files: [file] })) {
                     await navigator.share({ files: [file], title: 'Моя реакция 😱' });
+                    this.log('Shared!');
                     return;
                 }
             } catch (err) {
                 if (err.name === 'AbortError') return;
-                this.log('Share err: ' + err.name);
+                this.log('Share: ' + err.name);
             }
         }
-        this.download();
+        
+        this.log('Share not available');
+        alert('Зажми видео и выбери "Сохранить"');
     }
 };
 
 // Init
 document.addEventListener('DOMContentLoaded', () => Camera.init());
 
-// Globals
+// Globals — теперь всё через showVideo()
 function showReactionPreview() {
-    if (Camera.showPreview()) {
-        document.getElementById('results')?.classList.remove('active');
-        document.getElementById('reactionPreview')?.classList.add('active');
-    }
+    Camera.showVideo();
 }
 
 function closeReactionPreview() {
-    document.getElementById('reactionPreview')?.classList.remove('active');
+    const overlay = document.getElementById('videoOverlay');
+    if (overlay) overlay.remove();
     document.getElementById('results')?.classList.add('active');
 }
 
-function downloadReaction() { Camera.download(); }
-function shareReaction() { Camera.share(); }
+function downloadReaction() {
+    Camera.showVideo();
+}
+
+function shareReaction() {
+    Camera.share();
+}
