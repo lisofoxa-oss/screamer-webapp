@@ -1,11 +1,10 @@
 // ============================================================
-// camera.js — Запись реакции на скример
+// camera.js v2 — Запись реакции на скример (FIXED)
 //
-// Функционал:
-// - Кольцевой буфер ~5 сек (постоянно пишем, старое удаляем)
-// - При скримере: фиксируем буфер + пишем ещё 3 сек
-// - Preview после игры
-// - Сохранение / Share
+// Фиксы:
+// - Камера запускается асинхронно, не блокирует игру
+// - Улучшена логика буфера
+// - Корректный захват момента скримера
 // ============================================================
 
 const Camera = {
@@ -13,19 +12,18 @@ const Camera = {
     enabled: false,
     stream: null,
     mediaRecorder: null,
-    chunks: [],           // Все чанки с начала игры
-    screamerTime: 0,      // Когда был скример
-    recordingStartTime: 0,
+    chunks: [],
+    screamerTime: 0,
     finalBlob: null,
+    captureInProgress: false,
     
     // Настройки
-    BUFFER_SECONDS: 5,    // Секунд ДО скримера
-    POST_SECONDS: 3,      // Секунд ПОСЛЕ скримера
+    BUFFER_MS: 5000,      // 5 сек ДО скримера
+    POST_MS: 3000,        // 3 сек ПОСЛЕ скримера
     
     // DOM
     previewEl: null,
     videoEl: null,
-    recIndicator: null,
     
     // ============================================================
     // ИНИЦИАЛИЗАЦИЯ
@@ -34,18 +32,10 @@ const Camera = {
     init() {
         this.previewEl = document.getElementById('cameraPreview');
         this.videoEl = document.getElementById('cameraVideo');
-        this.recIndicator = document.getElementById('cameraRec');
         
         // Проверяем поддержку
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-            console.log('📷 Camera not supported');
-            this.hideOption();
-            return false;
-        }
-        
-        // Проверяем MediaRecorder
-        if (!window.MediaRecorder) {
-            console.log('📷 MediaRecorder not supported');
+        if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+            console.log('📷 Camera/MediaRecorder not supported');
             this.hideOption();
             return false;
         }
@@ -65,45 +55,45 @@ const Camera = {
     },
     
     // ============================================================
-    // ЗАПУСК КАМЕРЫ
+    // ЗАПУСК (не блокирует!)
     // ============================================================
     
-    async start() {
+    start() {
         if (!this.isEnabled()) {
             console.log('📷 Camera disabled by user');
-            return false;
+            return;
         }
         
+        // Запускаем асинхронно, не ждём
+        this._startAsync().catch(err => {
+            console.log('📷 Camera failed:', err.message);
+        });
+    },
+    
+    async _startAsync() {
         try {
-            // Запрашиваем камеру
             this.stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    facingMode: 'user',
-                    width: { ideal: 480 },
-                    height: { ideal: 640 }
-                },
-                audio: false  // Без звука (будет игровой звук)
+                video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 640 } },
+                audio: false
             });
             
             // Показываем превью
             if (this.videoEl) {
                 this.videoEl.srcObject = this.stream;
+                await this.videoEl.play().catch(() => {});
             }
             if (this.previewEl) {
                 this.previewEl.classList.add('active');
             }
             
             // Запускаем запись
-            this.startRecording();
-            
+            this._startRecording();
             this.enabled = true;
             console.log('📷 Camera started');
-            return true;
             
         } catch (err) {
             console.log('📷 Camera error:', err.message);
             this.enabled = false;
-            return false;
         }
     },
     
@@ -111,67 +101,46 @@ const Camera = {
     // ЗАПИСЬ
     // ============================================================
     
-    startRecording() {
+    _startRecording() {
         if (!this.stream) return;
         
         // Выбираем формат
-        const mimeTypes = [
-            'video/webm;codecs=vp9',
-            'video/webm;codecs=vp8',
-            'video/webm',
-            'video/mp4'
-        ];
-        
-        let mimeType = '';
-        for (const type of mimeTypes) {
-            if (MediaRecorder.isTypeSupported(type)) {
-                mimeType = type;
-                break;
-            }
-        }
+        const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4']
+            .find(t => MediaRecorder.isTypeSupported(t));
         
         if (!mimeType) {
-            console.log('📷 No supported video format');
+            console.log('📷 No supported format');
             return;
         }
         
-        console.log('📷 Using format:', mimeType);
-        
         this.chunks = [];
-        this.recordingStartTime = Date.now();
         this.screamerTime = 0;
         this.finalBlob = null;
+        this.captureInProgress = false;
         
         try {
             this.mediaRecorder = new MediaRecorder(this.stream, {
                 mimeType,
-                videoBitsPerSecond: 1000000  // 1 Mbps
+                videoBitsPerSecond: 800000
             });
             
             this.mediaRecorder.ondataavailable = (e) => {
-                if (e.data && e.data.size > 0) {
-                    this.chunks.push({
-                        data: e.data,
-                        time: Date.now()
-                    });
+                if (e.data?.size > 0) {
+                    this.chunks.push({ data: e.data, time: Date.now() });
                     
-                    // Удаляем старые чанки (держим ~10 сек буфер)
-                    const cutoff = Date.now() - 10000;
-                    this.chunks = this.chunks.filter(c => c.time > cutoff);
+                    // Держим только последние 10 сек (буфер)
+                    if (!this.captureInProgress) {
+                        const cutoff = Date.now() - 10000;
+                        this.chunks = this.chunks.filter(c => c.time > cutoff);
+                    }
                 }
             };
             
-            this.mediaRecorder.onerror = (e) => {
-                console.log('📷 Recorder error:', e.error);
-            };
-            
-            // Записываем чанками по 500мс
-            this.mediaRecorder.start(500);
-            
-            console.log('📷 Recording started');
+            this.mediaRecorder.start(300);  // chunks каждые 300ms
+            console.log('📷 Recording started, format:', mimeType);
             
         } catch (err) {
-            console.log('📷 Recorder init error:', err);
+            console.log('📷 Recorder error:', err);
         }
     },
     
@@ -183,93 +152,91 @@ const Camera = {
         if (!this.enabled || !this.mediaRecorder) return;
         
         this.screamerTime = Date.now();
-        console.log('📷 Screamer captured!');
+        this.captureInProgress = true;
+        console.log('📷 Screamer! Capturing...');
         
-        // Записываем ещё POST_SECONDS секунд
+        // Записываем ещё POST_MS секунд, потом стоп
         setTimeout(() => {
-            this.stopRecording();
-        }, this.POST_SECONDS * 1000);
+            this._stopAndFinalize();
+        }, this.POST_MS);
     },
     
-    // ============================================================
-    // ОСТАНОВКА
-    // ============================================================
-    
-    stopRecording() {
+    _stopAndFinalize() {
         if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive') {
+            this._createFinalVideo();
             return;
         }
         
         this.mediaRecorder.onstop = () => {
-            this.createFinalVideo();
+            this._createFinalVideo();
         };
         
-        this.mediaRecorder.stop();
-        console.log('📷 Recording stopped');
+        try {
+            this.mediaRecorder.stop();
+        } catch (e) {
+            this._createFinalVideo();
+        }
     },
     
-    createFinalVideo() {
+    _createFinalVideo() {
         if (this.chunks.length === 0) {
-            console.log('📷 No chunks to process');
+            console.log('📷 No chunks');
             return;
         }
         
-        // Берём чанки вокруг скримера
-        // BUFFER_SECONDS до + POST_SECONDS после
-        const startTime = this.screamerTime - (this.BUFFER_SECONDS * 1000);
-        const endTime = this.screamerTime + (this.POST_SECONDS * 1000);
+        // Берём chunks: BUFFER_MS до скримера + POST_MS после
+        const startTime = this.screamerTime - this.BUFFER_MS;
+        const endTime = this.screamerTime + this.POST_MS + 500;  // +500ms запас
         
-        const relevantChunks = this.chunks.filter(c => 
-            c.time >= startTime && c.time <= endTime
-        );
+        let relevantChunks = this.chunks.filter(c => c.time >= startTime && c.time <= endTime);
         
-        if (relevantChunks.length === 0) {
-            // Берём последние чанки
-            relevantChunks.push(...this.chunks.slice(-16));
+        // Если мало — берём все
+        if (relevantChunks.length < 3) {
+            relevantChunks = this.chunks;
         }
         
         const blobs = relevantChunks.map(c => c.data);
         this.finalBlob = new Blob(blobs, { type: blobs[0]?.type || 'video/webm' });
         
-        console.log('📷 Final video created:', Math.round(this.finalBlob.size / 1024), 'KB');
+        console.log('📷 Video ready:', Math.round(this.finalBlob.size / 1024), 'KB,', relevantChunks.length, 'chunks');
         
-        // Показываем кнопку просмотра
+        // Показываем кнопку
         const btn = document.getElementById('viewReactionBtn');
-        if (btn) {
+        if (btn && this.finalBlob.size > 1000) {
             btn.style.display = 'block';
         }
     },
     
     // ============================================================
-    // ОСТАНОВКА КАМЕРЫ
+    // STOP & CLEANUP
     // ============================================================
     
     stop() {
-        // Останавливаем запись если идёт
-        if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
-            try {
-                this.mediaRecorder.stop();
-            } catch (e) {}
+        if (this.mediaRecorder?.state !== 'inactive') {
+            try { this.mediaRecorder.stop(); } catch (e) {}
         }
         
-        // Останавливаем stream
         if (this.stream) {
-            this.stream.getTracks().forEach(track => track.stop());
+            this.stream.getTracks().forEach(t => t.stop());
             this.stream = null;
         }
         
-        // Скрываем превью
-        if (this.previewEl) {
-            this.previewEl.classList.remove('active');
-        }
-        if (this.videoEl) {
-            this.videoEl.srcObject = null;
-        }
+        if (this.previewEl) this.previewEl.classList.remove('active');
+        if (this.videoEl) this.videoEl.srcObject = null;
         
         this.enabled = false;
         this.mediaRecorder = null;
-        
         console.log('📷 Camera stopped');
+    },
+    
+    reset() {
+        this.chunks = [];
+        this.screamerTime = 0;
+        this.finalBlob = null;
+        this.captureInProgress = false;
+        
+        const btn = document.getElementById('viewReactionBtn');
+        if (btn) btn.style.display = 'none';
     },
     
     // ============================================================
@@ -277,8 +244,8 @@ const Camera = {
     // ============================================================
     
     showPreview() {
-        if (!this.finalBlob) {
-            console.log('📷 No video to preview');
+        if (!this.finalBlob || this.finalBlob.size < 1000) {
+            console.log('📷 No video to show');
             return false;
         }
         
@@ -286,7 +253,6 @@ const Camera = {
         if (video) {
             video.src = URL.createObjectURL(this.finalBlob);
         }
-        
         return true;
     },
     
@@ -301,68 +267,36 @@ const Camera = {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        
-        console.log('📷 Video downloaded');
     },
     
     async share() {
         if (!this.finalBlob) return;
         
-        // Проверяем поддержку Share API
-        if (!navigator.share || !navigator.canShare) {
-            // Fallback — скачиваем
-            this.download();
-            return;
-        }
-        
-        try {
-            const file = new File([this.finalBlob], 'reaction.webm', { 
-                type: this.finalBlob.type 
-            });
-            
-            if (navigator.canShare({ files: [file] })) {
-                await navigator.share({
-                    files: [file],
-                    title: 'Моя реакция на Чёрную Розу 😱',
-                    text: 'Посмотри как я испугался!'
-                });
-                console.log('📷 Video shared');
-            } else {
-                // Share не поддерживает файлы — скачиваем
-                this.download();
-            }
-        } catch (err) {
-            if (err.name !== 'AbortError') {
-                console.log('📷 Share error:', err);
-                this.download();
+        if (navigator.share && navigator.canShare) {
+            try {
+                const file = new File([this.finalBlob], 'reaction.webm', { type: this.finalBlob.type });
+                if (navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        files: [file],
+                        title: 'Моя реакция 😱',
+                        text: 'Чёрная Роза'
+                    });
+                    return;
+                }
+            } catch (err) {
+                if (err.name === 'AbortError') return;
             }
         }
-    },
-    
-    // ============================================================
-    // CLEANUP
-    // ============================================================
-    
-    reset() {
-        this.chunks = [];
-        this.screamerTime = 0;
-        this.recordingStartTime = 0;
-        this.finalBlob = null;
-        
-        const btn = document.getElementById('viewReactionBtn');
-        if (btn) btn.style.display = 'none';
+        this.download();
     }
 };
 
-// Инициализация при загрузке
-document.addEventListener('DOMContentLoaded', () => {
-    Camera.init();
-});
+// Init
+document.addEventListener('DOMContentLoaded', () => Camera.init());
 
-// Глобальные функции для HTML onclick
+// Global functions for HTML
 function showReactionPreview() {
     if (Camera.showPreview()) {
-        // Показываем экран preview
         document.getElementById('results')?.classList.remove('active');
         document.getElementById('reactionPreview')?.classList.add('active');
     }
@@ -373,10 +307,5 @@ function closeReactionPreview() {
     document.getElementById('results')?.classList.add('active');
 }
 
-function downloadReaction() {
-    Camera.download();
-}
-
-function shareReaction() {
-    Camera.share();
-}
+function downloadReaction() { Camera.download(); }
+function shareReaction() { Camera.share(); }
