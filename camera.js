@@ -1,366 +1,254 @@
-// ============================================================
-// camera.js v5 — Telegram WebApp compatible
-// ============================================================
+// camera.js v6 — DEBUG WITH ALERTS
 
 const Camera = {
-    enabled: false,
-    permissionGranted: false,
     stream: null,
     mediaRecorder: null,
     chunks: [],
-    screamerTime: 0,
     finalBlob: null,
-    dataUrl: null,  // Храним готовый data URL
-    captureInProgress: false,
+    dataUrl: null,
+    enabled: false,
+    permissionGranted: false,
     mimeType: null,
-    
-    BUFFER_MS: 5000,
-    POST_MS: 3500,
     
     previewEl: null,
     videoEl: null,
-    debugEl: null,
-    debugLines: [],
-    
-    // ============================================================
-    // INIT
-    // ============================================================
-    
+
     init() {
         this.previewEl = document.getElementById('cameraPreview');
         this.videoEl = document.getElementById('cameraVideo');
         
-        // Debug
-        this.debugEl = document.createElement('div');
-        this.debugEl.style.cssText = 'position:fixed;bottom:5px;left:5px;background:rgba(0,0,0,0.9);color:#0f0;font-size:9px;padding:4px 6px;border-radius:4px;z-index:9999;font-family:monospace;max-width:200px;line-height:1.3;';
-        document.body.appendChild(this.debugEl);
-        
+        // Проверки
         if (!navigator.mediaDevices?.getUserMedia) {
-            this.log('❌ No camera API');
-            this.hideOption();
-            return false;
+            console.log('📷 No getUserMedia');
+            return;
         }
-        
         if (!window.MediaRecorder) {
-            this.log('❌ No MediaRecorder');
-            this.hideOption();
-            return false;
+            console.log('📷 No MediaRecorder');
+            return;
         }
         
-        const types = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
-        this.mimeType = types.find(t => MediaRecorder.isTypeSupported(t));
+        // Формат
+        this.mimeType = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm','video/mp4']
+            .find(t => MediaRecorder.isTypeSupported(t));
         
         if (!this.mimeType) {
-            this.log('❌ No format');
-            this.hideOption();
-            return false;
+            console.log('📷 No format');
+            return;
         }
         
-        this.log('✓ ' + this.mimeType.split(';')[0]);
+        console.log('📷 Ready:', this.mimeType);
         
-        const checkbox = document.getElementById('cameraCheckbox');
-        if (checkbox) {
-            checkbox.addEventListener('change', (e) => {
+        // Чекбокс
+        const cb = document.getElementById('cameraCheckbox');
+        if (cb) {
+            cb.addEventListener('change', e => {
                 if (e.target.checked) this.requestPermission();
                 else this.stopStream();
             });
         }
-        
-        return true;
     },
-    
-    log(msg) {
-        console.log('📷', msg);
-        this.debugLines.push(msg);
-        if (this.debugLines.length > 5) this.debugLines.shift();
-        if (this.debugEl) this.debugEl.innerHTML = this.debugLines.join('<br>');
-    },
-    
-    hideOption() {
-        const opt = document.getElementById('cameraOption');
-        if (opt) opt.style.display = 'none';
-    },
-    
-    isEnabled() {
-        const cb = document.getElementById('cameraCheckbox');
-        return cb && cb.checked && this.permissionGranted;
-    },
-    
-    // ============================================================
-    // PERMISSION
-    // ============================================================
-    
+
     async requestPermission() {
-        this.log('Requesting camera...');
         try {
             this.stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 640 } },
+                video: { facingMode: 'user' },
                 audio: false
             });
             if (this.videoEl) {
                 this.videoEl.srcObject = this.stream;
-                this.videoEl.play().catch(() => {});
+                this.videoEl.play().catch(()=>{});
             }
             if (this.previewEl) this.previewEl.classList.add('active');
             this.permissionGranted = true;
-            this.log('✓ Camera ready');
-        } catch (err) {
-            this.log('❌ ' + err.name);
+            console.log('📷 Permission OK');
+        } catch (e) {
+            console.log('📷 Permission denied:', e.name);
             this.permissionGranted = false;
-            const cb = document.getElementById('cameraCheckbox');
-            if (cb) cb.checked = false;
         }
     },
-    
+
     stopStream() {
         if (this.stream) {
             this.stream.getTracks().forEach(t => t.stop());
             this.stream = null;
         }
         if (this.previewEl) this.previewEl.classList.remove('active');
-        if (this.videoEl) this.videoEl.srcObject = null;
         this.permissionGranted = false;
     },
-    
-    // ============================================================
-    // RECORDING
-    // ============================================================
-    
+
+    isEnabled() {
+        const cb = document.getElementById('cameraCheckbox');
+        return cb?.checked && this.permissionGranted && this.stream;
+    },
+
     start() {
-        this.log('start()');
-        if (!this.isEnabled() || !this.stream) {
-            this.log('Skip');
+        // DEBUG ALERT
+        alert('Camera.start() called!\nisEnabled: ' + this.isEnabled() + '\nstream: ' + !!this.stream);
+        
+        console.log('📷 start() called');
+        
+        if (!this.isEnabled()) {
+            console.log('📷 Not enabled, skip');
             return;
         }
-        
+
         this.chunks = [];
-        this.screamerTime = 0;
         this.finalBlob = null;
         this.dataUrl = null;
-        this.captureInProgress = false;
-        
+
         try {
             this.mediaRecorder = new MediaRecorder(this.stream, {
-                mimeType: this.mimeType,
-                videoBitsPerSecond: 800000
+                mimeType: this.mimeType
             });
-            
-            this.mediaRecorder.ondataavailable = (e) => {
+
+            this.mediaRecorder.ondataavailable = e => {
                 if (e.data?.size > 0) {
-                    this.chunks.push({ data: e.data, time: Date.now() });
-                    this.log('Chunk ' + this.chunks.length);
-                    if (!this.captureInProgress) {
-                        const cutoff = Date.now() - 12000;
-                        this.chunks = this.chunks.filter(c => c.time > cutoff);
-                    }
+                    this.chunks.push(e.data);
+                    console.log('📷 Chunk', this.chunks.length, e.data.size);
                 }
             };
-            
+
             this.mediaRecorder.onstart = () => {
-                this.log('▶ REC');
+                console.log('📷 Recording started');
                 this.enabled = true;
             };
+
+            this.mediaRecorder.onstop = () => {
+                console.log('📷 Recording stopped, chunks:', this.chunks.length);
+            };
+
+            this.mediaRecorder.onerror = e => {
+                console.log('📷 Error:', e.error);
+            };
+
+            // Старт с интервалом 500ms
+            this.mediaRecorder.start(500);
             
-            this.mediaRecorder.start(400);
-        } catch (err) {
-            this.log('❌ ' + err.message);
+        } catch (e) {
+            console.log('📷 Start error:', e);
         }
     },
-    
-    // ============================================================
-    // SCREAMER
-    // ============================================================
-    
+
     onScreamer() {
-        this.log('onScreamer');
-        if (!this.enabled || !this.mediaRecorder || this.mediaRecorder.state !== 'recording') {
-            this.log('Skip: not recording');
-            return;
-        }
+        // DEBUG ALERT
+        alert('onScreamer!\nenabled: ' + this.enabled + '\nchunks: ' + this.chunks.length);
         
-        this.screamerTime = Date.now();
-        this.captureInProgress = true;
-        this.log('😱 ' + this.chunks.length + ' chunks');
+        console.log('📷 onScreamer, enabled:', this.enabled, 'chunks:', this.chunks.length);
         
-        setTimeout(() => this.finalize(), this.POST_MS);
-    },
-    
-    finalize() {
-        this.log('finalize()');
-        
-        if (this.mediaRecorder?.state === 'recording') {
-            try { this.mediaRecorder.requestData(); } catch (e) {}
-        }
-        
+        if (!this.enabled || !this.mediaRecorder) return;
+        if (this.mediaRecorder.state !== 'recording') return;
+
+        // Ждём 3 сек и останавливаем
         setTimeout(() => {
+            console.log('📷 Stopping after 3s...');
+            
             if (this.mediaRecorder?.state === 'recording') {
-                try { this.mediaRecorder.stop(); } catch (e) {}
+                this.mediaRecorder.stop();
             }
-            setTimeout(() => this.createVideo(), 300);
-        }, 200);
+            
+            // Ждём ещё чуть и создаём blob
+            setTimeout(() => this.createBlob(), 500);
+        }, 3000);
     },
-    
-    createVideo() {
-        this.log('createVideo: ' + this.chunks.length);
+
+    createBlob() {
+        console.log('📷 createBlob, chunks:', this.chunks.length);
         
         if (this.chunks.length === 0) {
-            this.log('❌ 0 chunks');
+            console.log('📷 No chunks!');
             return;
         }
-        
-        const blobs = this.chunks.map(c => c.data);
-        this.finalBlob = new Blob(blobs, { type: this.mimeType });
-        
-        this.log('Blob: ' + Math.round(this.finalBlob.size / 1024) + 'KB');
-        
-        // Сразу конвертируем в data URL (для Telegram)
-        this.log('Converting...');
+
+        this.finalBlob = new Blob(this.chunks, { type: this.mimeType });
+        console.log('📷 Blob size:', this.finalBlob.size);
+
+        // Конвертируем в data URL
         const reader = new FileReader();
         reader.onload = () => {
             this.dataUrl = reader.result;
-            this.log('✓ Data URL ready');
+            console.log('📷 DataURL ready, length:', this.dataUrl.length);
             
+            // Показываем кнопку
             const btn = document.getElementById('viewReactionBtn');
-            if (btn && this.dataUrl) {
+            if (btn) {
                 btn.style.display = 'block';
-                this.log('Button ON');
+                console.log('📷 Button shown');
             }
         };
-        reader.onerror = () => this.log('Convert error');
         reader.readAsDataURL(this.finalBlob);
     },
-    
-    // ============================================================
-    // STOP & RESET
-    // ============================================================
-    
+
     stop() {
         if (this.mediaRecorder?.state === 'recording') {
-            try { this.mediaRecorder.stop(); } catch (e) {}
+            this.mediaRecorder.stop();
         }
         this.enabled = false;
-        this.mediaRecorder = null;
     },
-    
+
     reset() {
         this.chunks = [];
-        this.screamerTime = 0;
         this.finalBlob = null;
         this.dataUrl = null;
-        this.captureInProgress = false;
         this.enabled = false;
         const btn = document.getElementById('viewReactionBtn');
         if (btn) btn.style.display = 'none';
     },
-    
-    // ============================================================
-    // SHOW VIDEO (unified for preview and download)
-    // ============================================================
-    
+
     showVideo() {
-        this.log('showVideo()');
+        // ALERT для отладки
+        alert('showVideo called!\ndataUrl: ' + (this.dataUrl ? 'YES ' + this.dataUrl.length : 'NO'));
         
         if (!this.dataUrl) {
-            this.log('No data URL!');
-            alert('Видео ещё конвертируется, подожди пару секунд');
-            return false;
-        }
-        
-        // Создаём fullscreen overlay с видео
-        let overlay = document.getElementById('videoOverlay');
-        if (overlay) overlay.remove();
-        
-        overlay = document.createElement('div');
-        overlay.id = 'videoOverlay';
-        overlay.style.cssText = `
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: #000;
-            z-index: 99999;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 15px;
-        `;
-        
-        overlay.innerHTML = `
-            <div style="color:#fff;font-size:13px;text-align:center;margin-bottom:10px;">
-                Твоя реакция 😱
-            </div>
-            <video id="overlayVideo" controls playsinline
-                style="max-width:100%;max-height:55vh;border-radius:8px;background:#111;">
-            </video>
-            <div style="color:#888;font-size:11px;margin-top:12px;text-align:center;line-height:1.5;">
-                📱 Чтобы сохранить:<br>
-                <strong>Зажми видео</strong> → "Сохранить"
-            </div>
-            <div style="display:flex;gap:10px;margin-top:15px;">
-                <button id="overlayShare" style="padding:10px 20px;background:#8b5cf6;color:#fff;border:none;border-radius:8px;font-size:13px;">
-                    📤 Поделиться
-                </button>
-                <button id="overlayClose" style="padding:10px 20px;background:#333;color:#fff;border:none;border-radius:8px;font-size:13px;">
-                    Закрыть
-                </button>
-            </div>
-        `;
-        
-        document.body.appendChild(overlay);
-        
-        // Устанавливаем видео
-        const video = document.getElementById('overlayVideo');
-        if (video) {
-            video.src = this.dataUrl;
-            video.load();
-        }
-        
-        // Кнопки
-        document.getElementById('overlayClose').onclick = () => overlay.remove();
-        document.getElementById('overlayShare').onclick = () => this.share();
-        
-        this.log('Overlay shown');
-        return true;
-    },
-    
-    async share() {
-        this.log('share()');
-        
-        if (!this.finalBlob) {
-            this.log('No blob');
+            alert('Видео не готово');
             return;
         }
+
+        // Fullscreen overlay
+        let ov = document.getElementById('camOverlay');
+        if (ov) ov.remove();
+
+        ov = document.createElement('div');
+        ov.id = 'camOverlay';
+        ov.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:#000;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;';
         
-        if (navigator.share && navigator.canShare) {
-            try {
-                const file = new File([this.finalBlob], 'reaction.webm', { type: this.finalBlob.type });
-                if (navigator.canShare({ files: [file] })) {
-                    await navigator.share({ files: [file], title: 'Моя реакция 😱' });
-                    this.log('Shared!');
-                    return;
-                }
-            } catch (err) {
-                if (err.name === 'AbortError') return;
-                this.log('Share: ' + err.name);
-            }
+        ov.innerHTML = `
+            <p style="color:#fff;margin-bottom:15px;">Твоя реакция 😱</p>
+            <video controls playsinline style="max-width:90%;max-height:50vh;background:#222;"></video>
+            <p style="color:#888;font-size:12px;margin-top:15px;text-align:center;">
+                📱 Зажми видео → Сохранить
+            </p>
+            <button style="margin-top:20px;padding:12px 30px;background:#8b5cf6;color:#fff;border:none;border-radius:8px;">
+                Закрыть
+            </button>
+        `;
+        
+        document.body.appendChild(ov);
+        
+        const video = ov.querySelector('video');
+        video.src = this.dataUrl;
+        
+        ov.querySelector('button').onclick = () => ov.remove();
+    },
+
+    share() {
+        if (!this.finalBlob) return;
+        
+        if (navigator.share) {
+            const file = new File([this.finalBlob], 'reaction.webm', { type: this.mimeType });
+            navigator.share({ files: [file] }).catch(() => {});
         }
-        
-        this.log('Share not available');
-        alert('Зажми видео и выбери "Сохранить"');
     }
 };
 
-// Init
 document.addEventListener('DOMContentLoaded', () => Camera.init());
 
-// Globals — теперь всё через showVideo()
 function showReactionPreview() {
     Camera.showVideo();
 }
 
 function closeReactionPreview() {
-    const overlay = document.getElementById('videoOverlay');
-    if (overlay) overlay.remove();
-    document.getElementById('results')?.classList.add('active');
+    const ov = document.getElementById('camOverlay');
+    if (ov) ov.remove();
 }
 
 function downloadReaction() {
